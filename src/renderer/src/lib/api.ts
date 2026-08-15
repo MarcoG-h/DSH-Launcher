@@ -1,4 +1,5 @@
 import type {
+  ApiPreset,
   BalanceData,
   BalanceResult,
   BootstrapState,
@@ -14,6 +15,7 @@ import type {
 } from '../../../shared/types'
 
 export type {
+  ApiPreset,
   BalanceData,
   BalanceResult,
   BootstrapState,

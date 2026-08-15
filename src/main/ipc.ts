@@ -5,10 +5,10 @@ import * as dshview from './dshview'
 import * as harness from './harness'
 import * as plugins from './plugins'
 import * as runtime from './runtime'
-import { registerEmbeddedContextMenu } from './webview'
+import { registerEmbeddedView } from './webview'
 
 export function registerIpc(): void {
-  registerEmbeddedContextMenu()
+  registerEmbeddedView()
   ipcMain.handle('state:get', () => ({
     state: harness.getState(),
     log: harness.getLog().slice(-800),

@@ -26,6 +26,34 @@ DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 | 内置版(推荐) | 「快速离线部署」一键安装便携 Node + dsh,目标机器无需任何前置环境 |
 | 源码版 | 需要本机 Node.js + pnpm,可调试 / 修改 Harness 源码 |
 
+## 快速部署教程(全程鼠标点击,无需命令行)
+
+目标机器**无需安装 Node.js、无需源码**,跟着下面三步即可用上 dsh。
+
+### 第 1 步:打开「设置」
+
+启动 DSH Launcher 后,点击左侧边栏的 **「设置」**。
+
+![第 1 步:点击「设置」](screenshots/quickstart-1-dashboard.png)
+
+### 第 2 步:一键离线部署
+
+在「快速离线部署」面板点击 **「快速离线部署」** 按钮,等待自动安装便携 Node + dsh 运行环境(全程离线可用)。部署完成后应用会自动切换为内置模式并回填路径。
+
+![第 2 步:点击「快速离线部署」](screenshots/quickstart-2-settings-deploy.png)
+
+### 第 3 步:启动 dsh
+
+回到 **「控制台」**,点击 **「启动」**。就绪后会自动进入 DSH 界面,即可开始使用。
+
+![第 3 步:点击「启动」](screenshots/quickstart-3-start.png)
+
+### 可选:一键切换 API 厂商
+
+在「设置 → API 切换」里可添加 / 切换 AI 厂商预设(DeepSeek 官方、中转、硅基流动等)。预设的地址与 API Key 会在启动时自动注入 dsh,无需再去 DSH 界面填写;切换后重启 dsh 生效。
+
+![API 切换](screenshots/quickstart-4-api-switch.png)
+
 ## 开发与构建
 
 ```bash

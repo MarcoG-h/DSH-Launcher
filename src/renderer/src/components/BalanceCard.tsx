@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { api, type BalanceData } from '../lib/api'
+import { useHarness } from '../hooks/useHarness'
 import { RefreshIcon } from '../lib/icons'
 
-/** DeepSeek balance widget — manual + 5-minute auto refresh. */
+/** Balance widget — manual + 5-minute auto refresh, follows the active API preset. */
 export function BalanceCard(): JSX.Element {
+  const { config, saveConfig } = useHarness()
   const [data, setData] = useState<BalanceData | null>(null)
+  const [provider, setProvider] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
+  const presets = config?.apiPresets ?? []
+  const activeId = config?.activeApiPresetId
 
   const load = useCallback(async (silent = false): Promise<void> => {
     if (!silent) setLoading(true)
     const r = await api.getBalance()
+    setProvider(r.provider ?? null)
     if (r.ok && r.data) {
       setData(r.data)
       setError(null)
@@ -28,13 +35,19 @@ export function BalanceCard(): JSX.Element {
     return () => clearInterval(t)
   }, [load])
 
+  // One-click vendor switch: persist the new active preset, then refresh balance.
+  const switchPreset = async (id: string): Promise<void> => {
+    await saveConfig({ activeApiPresetId: id })
+    await load(true)
+  }
+
   const availableColor = data?.is_available ? 'var(--ok)' : 'var(--warn)'
 
   return (
     <div className="panel p-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
-          <h3 className="section-title">DeepSeek 余额</h3>
+          <h3 className="section-title">{provider ?? 'API'} 余额</h3>
           {data && (
             <span
               className="badge"
@@ -48,9 +61,25 @@ export function BalanceCard(): JSX.Element {
             </span>
           )}
         </div>
-        <button className="btn btn-ghost btn-sm shrink-0" onClick={() => void load()} title="刷新余额">
-          <RefreshIcon /> {loading ? '刷新中…' : '刷新'}
-        </button>
+        <div className="flex items-center gap-2">
+          {presets.length > 0 && (
+            <select
+              className="input"
+              value={activeId ?? ''}
+              onChange={(e) => void switchPreset(e.target.value)}
+              title="切换 API 厂商(重启 dsh 后注入新地址)"
+            >
+              {presets.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <button className="btn btn-ghost btn-sm shrink-0" onClick={() => void load()} title="刷新余额">
+            <RefreshIcon /> {loading ? '刷新中…' : '刷新'}
+          </button>
+        </div>
       </div>
 
       {error ? (

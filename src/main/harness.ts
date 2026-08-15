@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createConnection } from 'node:net'
-import { getConfig } from './config'
+import { getActiveApiPreset, getConfig } from './config'
 import { bundledEnv, resolveBundledDshBin, resolveBundledNode } from './runtime'
 import { broadcast } from './bus'
 import type { HarnessState, LauncherConfig, LogLine } from '../shared/types'
@@ -122,11 +122,29 @@ export async function start(): Promise<{ ok: boolean; error?: string }> {
   pushLine('stderr', `[launcher] 启动 dsh profile "${cfg.profile}" (${cfg.installMode === 'bundled' ? '内置运行环境' : '源码版'})`)
   pushLine('stderr', `[launcher] ${plan.cmd} ${plan.args.join(' ')}`)
 
+  // Inject the active API vendor's endpoint AND key. harness reads
+  // DEEPSEEK_BASE_URL only from the process env at boot (bootstrap-only), and
+  // resolves DEEPSEEK_API_KEY per request with the inherited process env ranked
+  // above .credentials.yaml — so both must be provided here at spawn. We merge
+  // after envPatch so a bundled-runtime patch always wins.
+  const preset = getActiveApiPreset()
+  const apiEnv: NodeJS.ProcessEnv = {}
+  if (preset.baseUrl) apiEnv.DEEPSEEK_BASE_URL = preset.baseUrl
+  if (preset.apiKey?.trim()) apiEnv.DEEPSEEK_API_KEY = preset.apiKey.trim()
+  if (apiEnv.DEEPSEEK_BASE_URL) {
+    pushLine('stderr', `[launcher] API 厂商: ${preset.name} (${preset.baseUrl})`)
+  }
+  if (apiEnv.DEEPSEEK_API_KEY) {
+    pushLine('stderr', `[launcher] 已注入该厂商的 API Key(${preset.name}) — 模型调用不再需要去 DSH 界面填 key`)
+  } else if (apiEnv.DEEPSEEK_BASE_URL) {
+    pushLine('stderr', '[launcher] 该预设未填 API Key — 将使用 ~/.dsh/.credentials.yaml 中已存的 key,若无则模型调用会报 MISSING_CREDENTIAL')
+  }
+
   let proc: ChildProcess
   try {
     proc = spawn(plan.cmd, plan.args, {
       cwd: plan.cwd,
-      env: { ...process.env, ...(plan.envPatch ?? {}) },
+      env: { ...process.env, ...(plan.envPatch ?? {}), ...apiEnv },
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     })

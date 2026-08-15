@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import { api, type LauncherConfig } from '../lib/api'
+import { api, type ApiPreset, type LauncherConfig } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
 import { TaskConsole } from '../components/TaskConsole'
-import { DownloadIcon, RefreshIcon, PowerIcon } from '../lib/icons'
+import { DownloadIcon, RefreshIcon, PowerIcon, PlusIcon, TrashIcon } from '../lib/icons'
 
 function Field({ label, value, onChange, mono = true, hint }: { label: string; value: string; onChange: (v: string) => void; mono?: boolean; hint?: string }): JSX.Element {
   return (
@@ -26,9 +26,16 @@ export function Settings(): JSX.Element {
   const [dlDone, setDlDone] = useState(false)
   const [rtBusy, setRtBusy] = useState<'install' | 'update' | null>(null)
   const [rtDone, setRtDone] = useState(false)
+  // API presets are edited in a dedicated local state (nested array in config).
+  const [presets, setPresets] = useState<ApiPreset[]>([])
+  const [activeId, setActiveId] = useState('deepseek-official')
 
   useEffect(() => {
-    if (config) setForm((f) => ({ ...f, ...config }))
+    if (config) {
+      setForm((f) => ({ ...f, ...config }))
+      setPresets((config.apiPresets ?? []).map((p) => ({ ...p })))
+      setActiveId(config.activeApiPresetId ?? 'deepseek-official')
+    }
   }, [config])
 
   const set = (k: keyof LauncherConfig) => (v: string | number | boolean | string[]) => {
@@ -37,9 +44,36 @@ export function Settings(): JSX.Element {
   }
 
   const doSave = async (): Promise<void> => {
-    await saveConfig(form as Partial<LauncherConfig>)
+    await saveConfig({
+      ...(form as Partial<LauncherConfig>),
+      apiPresets: presets,
+      activeApiPresetId: activeId
+    })
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
+  }
+
+  // --- API preset editing (local state, persisted together with doSave) ---
+  const updatePreset = (id: string, patch: Partial<ApiPreset>): void => {
+    setPresets((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)))
+    setSaved(false)
+  }
+  const setActivePreset = (id: string): void => {
+    setActiveId(id)
+    setSaved(false)
+  }
+  const removePreset = (id: string): void => {
+    setPresets((ps) => {
+      const next = ps.filter((p) => p.id !== id)
+      if (activeId === id) setActiveId(next[0]?.id ?? '')
+      return next
+    })
+    setSaved(false)
+  }
+  const addPreset = (): void => {
+    const id = `custom-${Date.now()}`
+    setPresets((ps) => [...ps, { id, name: '新厂商', baseUrl: '', balanceUrl: '', apiKey: '' }])
+    setSaved(false)
   }
 
   const run = async (label: string, fn: () => Promise<unknown>): Promise<void> => {
@@ -231,6 +265,106 @@ export function Settings(): JSX.Element {
         </div>
         <div className="pt-1">
           <button className="btn btn-primary" onClick={() => void doSave()}>
+            {saved ? '已保存 ✓' : '保存设置'}
+          </button>
+        </div>
+      </div>
+
+      {/* API vendor presets */}
+      <div className="panel p-5 space-y-4">
+        <div className="space-y-1">
+          <h3 className="section-title">API 切换</h3>
+          <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--muted)' }}>
+            在多个 AI 厂商预设之间一键切换。切换后需重启 dsh 生效 —— 启动时会自动注入该厂商的地址和 API
+            Key(同时用于余额查询),无需再去 DSH 界面填。预设没填 Key 时,沿用 <span className="mono">~/.dsh/.credentials.yaml</span> 里已有的。
+          </p>
+        </div>
+        <div className="space-y-3">
+          {presets.length === 0 && (
+            <p className="text-[12.5px]" style={{ color: 'var(--muted)' }}>
+              暂无预设,点击下方「添加预设」创建一个。
+            </p>
+          )}
+          {presets.map((p) => {
+            const isActive = p.id === activeId
+            return (
+              <div
+                key={p.id}
+                className="border rounded-lg p-3 space-y-2.5"
+                style={{
+                  borderColor: isActive ? 'var(--accent)' : 'var(--border)',
+                  background: isActive ? 'var(--accent-soft)' : 'transparent'
+                }}
+              >
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <input
+                      className="input mono"
+                      value={p.name}
+                      placeholder="厂商名称"
+                      onChange={(e) => updatePreset(p.id, { name: e.target.value })}
+                      style={{ width: 180 }}
+                    />
+                    {isActive && (
+                      <span className="badge" style={{ color: '#fff', background: 'var(--accent)' }}>
+                        当前
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    {!isActive && (
+                      <button className="btn btn-ghost btn-sm" onClick={() => setActivePreset(p.id)}>
+                        设为当前
+                      </button>
+                    )}
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => removePreset(p.id)}
+                      disabled={presets.length <= 1}
+                    >
+                      <TrashIcon /> 删除
+                    </button>
+                  </div>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="label">模型 API 地址 (baseUrl)</label>
+                    <input
+                      className="input mono"
+                      value={p.baseUrl}
+                      placeholder="https://api.deepseek.com"
+                      onChange={(e) => updatePreset(p.id, { baseUrl: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="label">余额接口 (balanceUrl,可留空)</label>
+                    <input
+                      className="input mono"
+                      value={p.balanceUrl}
+                      placeholder="https://api.deepseek.com/user/balance"
+                      onChange={(e) => updatePreset(p.id, { balanceUrl: e.target.value })}
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="label">API Key(注入 dsh 供模型调用 + 余额查询)</label>
+                    <input
+                      className="input mono"
+                      type="password"
+                      value={p.apiKey ?? ''}
+                      placeholder="sk-…"
+                      onChange={(e) => updatePreset(p.id, { apiKey: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+        <div className="flex items-center gap-2">
+          <button className="btn btn-ghost btn-sm" onClick={addPreset}>
+            <PlusIcon /> 添加预设
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={() => void doSave()}>
             {saved ? '已保存 ✓' : '保存设置'}
           </button>
         </div>

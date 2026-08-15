@@ -47,6 +47,24 @@ export interface LauncherConfig {
   startupTimeoutMs: number
   /** Optional DeepSeek API key override for the balance widget; empty ⇒ read from dsh credentials. */
   deepseekApiKey?: string
+  /** API provider presets for one-click switching between AI vendors. */
+  apiPresets: ApiPreset[]
+  /** Which preset is currently active (its baseUrl is injected into dsh at launch). */
+  activeApiPresetId: string
+}
+
+/** An OpenAI-compatible API vendor preset: model base URL + optional balance endpoint. */
+export interface ApiPreset {
+  /** Stable identifier, e.g. 'deepseek-official'. */
+  id: string
+  /** Display name, e.g. 'DeepSeek 官方'. */
+  name: string
+  /** Model API base URL — injected as DEEPSEEK_BASE_URL when launching dsh. Empty = skip injection. */
+  baseUrl: string
+  /** Balance endpoint full URL; empty = this vendor has no balance API. */
+  balanceUrl: string
+  /** Preset-specific API key for the balance widget; takes precedence over the global key. */
+  apiKey?: string
 }
 
 export interface InstalledPlugin {
@@ -116,6 +134,8 @@ export interface BalanceResult {
   ok: boolean
   data?: BalanceData
   error?: string
+  /** Display name of the provider the balance came from (for the widget title). */
+  provider?: string
 }
 
 export interface DshLauncherApi {

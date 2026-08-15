@@ -2,13 +2,30 @@ import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import type { LauncherConfig } from '../shared/types'
+import type { ApiPreset, LauncherConfig } from '../shared/types'
 
 const home = homedir()
 
 function firstExisting(candidates: string[]): string {
   return candidates.find(c => c && existsSync(resolve(c))) ?? candidates.find(c => c) ?? ''
 }
+
+const DEFAULT_API_PRESETS: ApiPreset[] = [
+  {
+    id: 'deepseek-official',
+    name: 'DeepSeek 官方',
+    baseUrl: 'https://api.deepseek.com',
+    balanceUrl: 'https://api.deepseek.com/user/balance',
+    apiKey: ''
+  },
+  {
+    id: 'custom',
+    name: '自定义 / 中转',
+    baseUrl: '',
+    balanceUrl: '',
+    apiKey: ''
+  }
+]
 
 function defaults(): LauncherConfig {
   const harnessRepo = firstExisting([process.env.DSH_REPO ?? '', join(home, 'deepseek-harness')])
@@ -31,8 +48,17 @@ function defaults(): LauncherConfig {
     buildCmd: 'pnpm run build',
     stopOnQuit: true,
     pnpm: 'pnpm',
-    startupTimeoutMs: 90000
+    startupTimeoutMs: 90000,
+    apiPresets: DEFAULT_API_PRESETS.map((p) => ({ ...p })),
+    activeApiPresetId: 'deepseek-official'
   }
+}
+
+/** The currently active API preset; falls back to the first preset (or DeepSeek official). */
+export function getActiveApiPreset(): ApiPreset {
+  const cfg = getConfig()
+  const presets = cfg.apiPresets ?? []
+  return presets.find((p) => p.id === cfg.activeApiPresetId) ?? presets[0] ?? DEFAULT_API_PRESETS[0]
 }
 
 let cache: LauncherConfig | null = null
