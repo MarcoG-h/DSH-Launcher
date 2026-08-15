@@ -2,7 +2,7 @@
 
 > 最方便的 DSH 启动器兼第三方插件管理:一键式安装、客户端界面、快捷的启动与重启。
 
-DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的桌面启动器(Electron + React + Tailwind,界面风格参考 CC Switch)。把「安装运行环境、启动、重启、观察日志、管理第三方插件」这些操作收敛到一个本地客户端里,启动失败(比如依赖缺失)也能直接在界面里看到原因并一键修复。
+DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的桌面启动器(Electron + React + Tailwind)。把「安装运行环境、启动、重启、观察日志、管理第三方插件」这些操作收敛到一个本地客户端里。
 
 [English README](README.en.md)
 
