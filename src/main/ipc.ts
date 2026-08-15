@@ -4,6 +4,7 @@ import { getConfig, setConfig } from './config'
 import { t } from './i18n'
 import * as dshview from './dshview'
 import * as harness from './harness'
+import * as market from './market'
 import * as plugins from './plugins'
 import * as runtime from './runtime'
 import { registerEmbeddedView } from './webview'
@@ -51,6 +52,10 @@ export function registerIpc(): void {
   ipcMain.handle('runtime:update', busyGuard(runtime.updateRuntime))
 
   ipcMain.handle('balance:get', () => balance.getBalance())
+
+  // Plugin market (GitHub search, unauthenticated).
+  ipcMain.handle('market:search', (_e, page: number) => market.searchMarket(page))
+  ipcMain.handle('market:readme', (_e, owner: string, repo: string) => market.fetchReadme(String(owner), String(repo)))
 
   // Embedded DSH view (native WebContentsView) — bounds follow the sidebar.
   ipcMain.on('dsh:set-active', (_e, active: boolean, reload?: boolean) =>

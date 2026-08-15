@@ -10,6 +10,9 @@ import type {
   LogLine,
   LocalPlugin,
   InstalledPlugin,
+  MarketPage,
+  MarketReadme,
+  MarketRepo,
   PluginListResult,
   TaskEvent
 } from '../../../shared/types'
@@ -26,6 +29,9 @@ export type {
   LogLine,
   LocalPlugin,
   InstalledPlugin,
+  MarketPage,
+  MarketReadme,
+  MarketRepo,
   PluginListResult,
   TaskEvent
 }

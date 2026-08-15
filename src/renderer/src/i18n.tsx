@@ -174,7 +174,29 @@ const zh: Record<string, string> = {
   'settings.maintenanceDesc.pre': '依赖缺失(如上次的',
   'settings.maintenanceDesc.tail': ' 报错)或源码改动后,需要先在仓库内重新安装 / 构建,再启动。',
   'settings.repair': '修复依赖 (pnpm install)',
-  'settings.rebuild': '重新构建 (pnpm run build)'
+  'settings.rebuild': '重新构建 (pnpm run build)',
+  // plugins page — local / market tabs
+  'plugins.tabLocal': '本地插件',
+  'plugins.tabMarket': '插件市场',
+  // plugin market
+  'market.searchPlaceholder': '搜索插件(名称 / 描述)…',
+  'market.refresh': '刷新',
+  'market.loading': '正在加载插件市场…',
+  'market.empty': '未找到相关插件。',
+  'market.error': '加载失败:',
+  'market.total': '共 {count} 个插件',
+  'market.updated': '更新于 {date}',
+  'market.install': '安装',
+  'market.installed': '已安装',
+  'market.details': '查看详情',
+  'market.readmeTitle': 'README',
+  'market.readmeLoading': '正在加载 README…',
+  'market.noReadme': '该仓库没有 README。',
+  'market.close': '关闭',
+  'market.pagePrev': '上一页',
+  'market.pageNext': '下一页',
+  'market.pageOf': '第 {page} / {pages} 页',
+  'market.readmeFailed': '加载 README 失败。'
 }
 
 const en: Record<string, string> = {
@@ -332,7 +354,29 @@ const en: Record<string, string> = {
   'settings.maintenanceDesc.pre': 'After missing dependencies (like the last',
   'settings.maintenanceDesc.tail': ' error) or source changes, reinstall / rebuild in the repo first, then start.',
   'settings.repair': 'Repair dependencies (pnpm install)',
-  'settings.rebuild': 'Rebuild (pnpm run build)'
+  'settings.rebuild': 'Rebuild (pnpm run build)',
+  // plugins page — local / market tabs
+  'plugins.tabLocal': 'Local Plugins',
+  'plugins.tabMarket': 'Plugin Market',
+  // plugin market
+  'market.searchPlaceholder': 'Search plugins (name / description)…',
+  'market.refresh': 'Refresh',
+  'market.loading': 'Loading the plugin market…',
+  'market.empty': 'No matching plugins found.',
+  'market.error': 'Failed to load:',
+  'market.total': '{count} plugin(s)',
+  'market.updated': 'Updated {date}',
+  'market.install': 'Install',
+  'market.installed': 'Installed',
+  'market.details': 'View details',
+  'market.readmeTitle': 'README',
+  'market.readmeLoading': 'Loading README…',
+  'market.noReadme': 'This repository has no README.',
+  'market.close': 'Close',
+  'market.pagePrev': 'Previous',
+  'market.pageNext': 'Next',
+  'market.pageOf': 'Page {page} of {pages}',
+  'market.readmeFailed': 'Failed to load the README.'
 }
 
 const messages: Record<Lang, Record<string, string>> = { zh, en }

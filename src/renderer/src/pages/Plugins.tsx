@@ -5,6 +5,7 @@ import { useHarness } from '../hooks/useHarness'
 import { useI18n } from '../i18n'
 import { TrashIcon, PlayIcon, DownloadIcon } from '../lib/icons'
 import { TaskConsole } from '../components/TaskConsole'
+import { MarketTab } from '../components/MarketTab'
 import { parseGitHubUrl } from '../../../shared/github'
 
 export function Plugins(): JSX.Element {
@@ -14,6 +15,7 @@ export function Plugins(): JSX.Element {
   const [spec, setSpec] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [tab, setTab] = useState<'local' | 'market'>('local')
 
   const load = useCallback(async () => {
     try {
@@ -84,8 +86,29 @@ export function Plugins(): JSX.Element {
         </span>
       </div>
 
-      {/* Install */}
-      <div className="panel p-4">
+      {/* Tabs: local plugins / plugin market */}
+      <div className="flex gap-1 border-b" style={{ borderColor: 'var(--border)' }}>
+        {(['local', 'market'] as const).map((k) => (
+          <button
+            key={k}
+            className="border-b-2 px-3 pb-2 text-[13px] font-medium transition-colors"
+            style={{
+              color: tab === k ? 'var(--accent)' : 'var(--muted)',
+              borderColor: tab === k ? 'var(--accent)' : 'transparent'
+            }}
+            onClick={() => setTab(k)}
+          >
+            {k === 'local' ? t('plugins.tabLocal') : t('plugins.tabMarket')}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'market' ? (
+        <MarketTab installed={installed} local={local} onRefresh={() => void load()} />
+      ) : (
+        <>
+          {/* Install */}
+          <div className="panel p-4">
         <label className="label">{t('plugins.installLabel')}</label>
         <div className="flex gap-2">
           <input
@@ -288,6 +311,8 @@ export function Plugins(): JSX.Element {
           </div>
         )}
       </section>
+        </>
+      )}
     </div>
   )
 }

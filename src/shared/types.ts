@@ -144,6 +144,42 @@ export interface BalanceResult {
   provider?: string
 }
 
+/** A dsh plugin discovered on GitHub (topic:dsh-plugin), mapped from the search API response. */
+export interface MarketRepo {
+  id: number
+  owner: string
+  /** Repository name (without owner), e.g. 'dsh-plugin-xxx'. */
+  repo: string
+  /** owner/repo */
+  fullName: string
+  description: string | null
+  htmlUrl: string
+  cloneUrl: string
+  stars: number
+  forks: number
+  language: string | null
+  /** ISO date string of the last push. */
+  updatedAt: string
+  topics: string[]
+  avatarUrl: string
+  defaultBranch: string
+}
+
+export interface MarketPage {
+  ok: boolean
+  repos: MarketRepo[]
+  totalCount: number
+  page: number
+  error?: string
+}
+
+export interface MarketReadme {
+  ok: boolean
+  /** Raw markdown of the repository README. */
+  text?: string
+  error?: string
+}
+
 export interface DshLauncherApi {
   getState(): Promise<BootstrapState>
   start(): Promise<CmdResult>
@@ -168,6 +204,10 @@ export interface DshLauncherApi {
   updateRuntime(): Promise<CmdResult>
   /** DeepSeek balance for the configured API key. */
   getBalance(): Promise<BalanceResult>
+  /** One page of the plugin market: GitHub repos tagged `dsh-plugin`, sorted by stars. */
+  searchMarket(page: number): Promise<MarketPage>
+  /** Raw markdown of a repository README for the market detail modal. */
+  fetchMarketReadme(owner: string, repo: string): Promise<MarketReadme>
   /** Show/hide the embedded DSH view; reload when the harness (re)became ready. */
   setDshActive(active: boolean, reload?: boolean): void
   /** Sync the sidebar width so the DSH view sits flush against it. */
