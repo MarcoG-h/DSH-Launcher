@@ -7,7 +7,7 @@ import { get as httpsGet } from 'node:https'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { getConfig, setConfig } from './config'
-import { runAsync, taskDone, taskLine } from './task'
+import { runAsync, taskDone, taskLine, taskProgress } from './task'
 import type { CmdResult } from '../shared/types'
 
 // --- layout helpers (always resolve from the live config) ---
@@ -60,9 +60,24 @@ export function bundledEnv(): NodeJS.ProcessEnv {
 function downloadFile(url: string, dest: string, onProgress: (received: number, total: number | null) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const file = createWriteStream(dest)
-    const req = httpsGet(url, (res) => {
+    let req: ReturnType<typeof httpsGet>
+    // Abort if no bytes arrive for a while — a stalled connection should surface
+    // as a clear error instead of hanging the deploy forever.
+    let stalled: ReturnType<typeof setTimeout> | null = null
+    const armStall = (): void => {
+      if (stalled) clearTimeout(stalled)
+      stalled = setTimeout(() => {
+        req.destroy(new Error('下载超时(60 秒无数据)— 请检查网络后重试'))
+      }, 60_000)
+    }
+    const disarmStall = (): void => {
+      if (stalled) clearTimeout(stalled)
+      stalled = null
+    }
+    req = httpsGet(url, (res) => {
       const status = res.statusCode ?? 0
       if (status >= 300 && status < 400 && res.headers.location) {
+        disarmStall()
         file.destroy()
         res.resume()
         req.destroy()
@@ -71,6 +86,7 @@ function downloadFile(url: string, dest: string, onProgress: (received: number, 
         return
       }
       if (status !== 200) {
+        disarmStall()
         file.destroy()
         res.resume()
         reject(new Error(`HTTP ${status}`))
@@ -80,13 +96,24 @@ function downloadFile(url: string, dest: string, onProgress: (received: number, 
       let received = 0
       res.on('data', (c: Buffer) => {
         received += c.length
+        armStall()
         onProgress(received, total)
       })
       res.pipe(file)
-      file.on('finish', () => file.close(() => resolve()))
+      file.on('finish', () => {
+        disarmStall()
+        file.close(() => resolve())
+      })
     })
-    req.on('error', reject)
-    file.on('error', reject)
+    armStall()
+    req.on('error', (err) => {
+      disarmStall()
+      reject(err)
+    })
+    file.on('error', (err) => {
+      disarmStall()
+      reject(err)
+    })
   })
 }
 
@@ -122,17 +149,39 @@ export async function installRuntime(): Promise<CmdResult> {
   const zip = join(root, `node-v${ver}-win-x64.zip`)
   const inner = join(stage, `node-v${ver}-win-x64`)
   const url = `https://registry.npmmirror.com/-/binary/node/v${ver}/node-v${ver}-win-x64.zip`
+  // npm installs inside the deploy must use the same mirror — otherwise a
+  // China-based machine crawls on the default registry and the deploy looks hung.
+  const REGISTRY = 'https://registry.npmmirror.com'
+  const npmOpts = ['--no-fund', '--no-audit', '--engine-strict=false', `--registry=${REGISTRY}`]
 
   mkdirSync(root, { recursive: true })
   taskLine(label, `[runtime] 目标目录: ${root}`)
+
+  // Ensure the plugin directory exists too, so a fresh install isn't left with
+  // a dangling Settings path (plugins.ts only creates it on first GitHub install).
+  const pluginDir = cfg.pluginDir || join(homedir(), 'DSH-Plugin')
+  mkdirSync(pluginDir, { recursive: true })
 
   // 1. portable Node
   if (existsSync(nodeExe())) {
     taskLine(label, `[runtime] Node v${ver} 已存在,跳过下载`)
   } else {
     taskLine(label, `[runtime] 下载 Node v${ver} …`)
+    taskProgress(label, 0.02, '下载 Node(约 30MB)')
+    const logDownload = progressLine(label)
+    // Throttle the bar to ~1% buckets so per-chunk progress doesn't flood IPC.
+    let lastBucket = -1
     try {
-      await downloadFile(url, zip, progressLine(label))
+      await downloadFile(url, zip, (received, total) => {
+        logDownload(received, total)
+        // Bytes-driven progress for the bar; guess size when no Content-Length.
+        const pct = total ? received / total : Math.min(1, received / (30 * 1024 * 1024))
+        const bucket = Math.floor(pct * 100)
+        if (bucket !== lastBucket) {
+          lastBucket = bucket
+          taskProgress(label, 0.02 + 0.38 * pct, '下载 Node')
+        }
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       taskLine(label, `[runtime] 下载失败: ${message}`, 'stderr')
@@ -141,6 +190,7 @@ export async function installRuntime(): Promise<CmdResult> {
     }
 
     taskLine(label, `[runtime] 解压到 ${dir} …`)
+    taskProgress(label, 0.42, '解压 Node')
     mkdirSync(stage, { recursive: true })
     // Windows ships bsdtar, which extracts zip archives.
     const x = await runAsync('tar', ['-xf', zip, '-C', stage], root, label, process.platform === 'win32')
@@ -173,8 +223,9 @@ export async function installRuntime(): Promise<CmdResult> {
     writeFileSync(pkg, JSON.stringify({ name: 'dsh-runtime', private: true, version: '0.0.0' }, null, 2) + '\n', 'utf8')
   }
   taskLine(label, `[runtime] 安装 @deepseek-ai/dsh@${dshVer}(含全部内置插件)…`)
+  taskProgress(label, 0.45, `安装 @deepseek-ai/dsh@${dshVer}(体积较大,请稍候)`)
   const npm = join(dir, 'npm.cmd')
-  const ins = await runAsync(npm, ['install', `@deepseek-ai/dsh@${dshVer}`, '--no-fund', '--no-audit'], dshDir, label, process.platform === 'win32')
+  const ins = await runAsync(npm, ['install', `@deepseek-ai/dsh@${dshVer}`, ...npmOpts], dshDir, label, process.platform === 'win32')
   if (!ins.ok) {
     taskDone(label, ins.code ?? 1)
     return ins
@@ -185,9 +236,10 @@ export async function installRuntime(): Promise<CmdResult> {
   }
 
   // 3. pnpm for `dsh plugin`
+  taskProgress(label, 0.86, '安装 pnpm')
   if (!existsSync(join(dir, 'pnpm.cmd'))) {
     taskLine(label, '[runtime] 安装 pnpm(供 dsh plugin 使用)…')
-    const pnpm = await runAsync(npm, ['install', '-g', 'pnpm', '--no-fund', '--no-audit'], dir, label, process.platform === 'win32')
+    const pnpm = await runAsync(npm, ['install', '-g', 'pnpm', ...npmOpts], dir, label, process.platform === 'win32')
     if (!pnpm.ok) {
       taskDone(label, pnpm.code ?? 1)
       return pnpm
@@ -195,6 +247,7 @@ export async function installRuntime(): Promise<CmdResult> {
   }
 
   // 4. auto-configure paths so the launcher switches to bundled mode.
+  taskProgress(label, 0.96, '写入配置')
   const next = setConfig({
     installMode: 'bundled',
     runtimeRoot: root,
@@ -204,6 +257,7 @@ export async function installRuntime(): Promise<CmdResult> {
     profile: cfg.profile || 'web',
     pnpm: join(dir, 'pnpm.cmd')
   })
+  taskProgress(label, 1, '部署完成')
   taskLine(label, '[runtime] ✔ 完成 — 已切换为 bundled 模式')
   taskLine(label, `[runtime] 启动命令: ${next.nodePath} ${[...next.launchArgs, next.profile].join(' ')}`)
   taskDone(label, 0)

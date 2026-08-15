@@ -204,3 +204,19 @@ body {
 .pulse-live {
   animation: pulse-ring 1.6s ease-out infinite;
 }
+
+/* Indeterminate progress bar for running steps without a known total */
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+
+.progress-indeterminate {
+  width: 30%;
+  background: var(--accent);
+  animation: progress-indeterminate 1.2s ease-in-out infinite;
+}

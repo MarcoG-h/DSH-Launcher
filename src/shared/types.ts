@@ -103,6 +103,10 @@ export interface TaskEvent {
   code: number | null
   stream?: 'stdout' | 'stderr'
   line?: string
+  /** 0..1 completion when determinable (e.g. file downloads); undefined = indeterminate. */
+  progress?: number
+  /** Short phase label for the progress UI, e.g. '下载 Node'. */
+  phase?: string
 }
 
 export type LauncherEvent =

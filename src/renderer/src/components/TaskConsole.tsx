@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { TaskLog } from '../lib/api'
 
 function lineColor(stream: string, line: string): string {
@@ -7,12 +7,50 @@ function lineColor(stream: string, line: string): string {
   return '#c3cad4'
 }
 
+function fmtElapsed(ms: number): string {
+  const s = Math.floor(ms / 1000)
+  if (s < 60) return `${s} 秒`
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return r > 0 ? `${m} 分 ${r} 秒` : `${m} 分`
+}
+
+/** Determinate bar when progress is known; animated when the step is running but indeterminate. */
+function ProgressBar({ progress, running }: { progress: number | null; running: boolean }): React.JSX.Element {
+  const pct = progress != null ? Math.round(Math.min(1, Math.max(0, progress)) * 100) : null
+  return (
+    <div
+      className="h-[5px] w-full overflow-hidden"
+      style={{ background: 'color-mix(in srgb, var(--accent) 12%, transparent)' }}
+    >
+      {pct != null ? (
+        <div
+          className="h-full transition-[width] duration-300 ease-out"
+          style={{ width: `${pct}%`, background: 'var(--accent)' }}
+        />
+      ) : running ? (
+        <div className="h-full progress-indeterminate" />
+      ) : null}
+    </div>
+  )
+}
+
 export function TaskConsole({ task }: { task: TaskLog }): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight
   }, [task.lines])
+
+  // Live elapsed counter while the task runs, so a long step shows it's alive.
+  useEffect(() => {
+    if (!task.running) return
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [task.running])
+
+  const elapsed = task.running ? Math.max(0, now - task.startedAt) : 0
 
   return (
     <div
@@ -21,13 +59,19 @@ export function TaskConsole({ task }: { task: TaskLog }): React.JSX.Element {
     >
       <div className="flex items-center gap-2 px-3 py-2 border-b" style={{ borderColor: 'var(--border)' }}>
         <span className="w-2 h-2 rounded-full" style={{ background: task.running ? 'var(--accent)' : task.code === 0 ? 'var(--ok)' : 'var(--err)' }} />
-        <span className="mono text-[12px] font-medium" style={{ color: 'var(--muted)' }}>
+        <span className="mono text-[12px] font-medium truncate" style={{ color: 'var(--muted)' }}>
           {task.label}
         </span>
-        <span className="ml-auto text-[11px]" style={{ color: 'var(--muted)' }}>
-          {task.running ? '执行中…' : task.code === 0 ? '完成 (exit 0)' : `失败 (exit ${task.code ?? '?'})`}
+        {task.phase && (
+          <span className="text-[11px] truncate min-w-0" style={{ color: 'var(--muted)' }}>
+            · {task.phase}
+          </span>
+        )}
+        <span className="ml-auto text-[11px] shrink-0" style={{ color: 'var(--muted)' }}>
+          {task.running ? `执行中 ${fmtElapsed(elapsed)}` : task.code === 0 ? '完成 (exit 0)' : `失败 (exit ${task.code ?? '?'})`}
         </span>
       </div>
+      <ProgressBar progress={task.progress} running={task.running} />
       <div ref={ref} className="log-console overflow-auto max-h-[220px] p-3">
         {task.lines.length === 0 ? (
           <div className="mono text-[12px]" style={{ color: '#5c6370' }}>

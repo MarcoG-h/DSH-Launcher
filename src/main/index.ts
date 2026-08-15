@@ -1,5 +1,5 @@
 import { app, BrowserWindow, shell } from 'electron'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bindWindow } from './bus'
@@ -55,6 +55,20 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  // Ensure the plugin folder and dsh home physically exist on a fresh machine —
+  // the Settings paths are computed from homedir() and are otherwise created
+  // lazily (plugins.ts on first GitHub install / dsh on first run), which leaves
+  // a dangling-looking path on a brand-new install.
+  const cfg = getConfig()
+  for (const dir of [cfg.pluginDir, cfg.dshHome]) {
+    if (dir) {
+      try {
+        mkdirSync(dir, { recursive: true })
+      } catch {
+        /* ignore — the folder is created lazily elsewhere anyway */
+      }
+    }
+  }
   registerIpc()
   ensureShortcuts()
   createWindow()

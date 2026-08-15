@@ -81,18 +81,48 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
       } else if (e.type === 'task') {
         const t = e.task
         setTasks((prev) => {
+          const now = Date.now()
           const current = prev[t.label]
-          if (t.status === 'start' && !t.line) {
+          // A genuine fresh start is a 'start' event with no line AND no progress
+          // payload (runAsync); taskProgress updates carry progress/phase and must
+          // not reset the accumulated log.
+          if (t.status === 'start' && !t.line && t.progress === undefined && t.phase === undefined) {
             // fresh start
-            return { ...prev, [t.label]: { label: t.label, running: true, code: null, lines: [], updatedAt: Date.now() } }
+            return {
+              ...prev,
+              [t.label]: {
+                label: t.label,
+                running: true,
+                code: null,
+                lines: [],
+                updatedAt: now,
+                progress: t.progress ?? null,
+                phase: t.phase ?? null,
+                startedAt: now
+              }
+            }
           }
-          const base = current ?? { label: t.label, running: true, code: null, lines: [], updatedAt: Date.now() }
+          const base =
+            current ??
+            ({
+              label: t.label,
+              running: true,
+              code: null,
+              lines: [],
+              updatedAt: now,
+              progress: null,
+              phase: null,
+              startedAt: now
+            } satisfies TaskLog)
+          const done = t.status === 'end'
           const next: TaskLog = {
             ...base,
-            running: t.status !== 'end',
-            code: t.status === 'end' ? t.code : base.code,
+            running: !done,
+            code: done ? t.code : base.code,
             lines: t.line ? [...base.lines, { stream: t.stream ?? 'stdout', line: t.line }] : base.lines,
-            updatedAt: Date.now()
+            updatedAt: now,
+            progress: done ? (t.code === 0 ? 1 : base.progress) : (t.progress ?? base.progress),
+            phase: done ? (t.code === 0 ? '完成' : base.phase) : (t.phase ?? base.phase)
           }
           return { ...prev, [t.label]: next }
         })

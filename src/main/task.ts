@@ -12,9 +12,21 @@ export function taskLine(label: string, line: string, stream: 'stdout' | 'stderr
   broadcast({ type: 'task', task: { label, status: 'start', code: null, stream, line } })
 }
 
+/** Emit a progress/phase update for a running task (progress 0..1, or null for indeterminate). */
+export function taskProgress(label: string, progress: number | null, phase?: string): void {
+  broadcast({ type: 'task', task: { label, status: 'start', code: null, progress: progress ?? undefined, phase } })
+}
+
 /** Close a task that never spawned a child (skipped path). */
 export function taskDone(label: string, code: number): void {
   broadcast({ type: 'task', task: { label, status: 'end', code } })
+}
+
+function formatElapsed(s: number): string {
+  if (s < 60) return `${s} 秒`
+  const m = Math.floor(s / 60)
+  const r = s % 60
+  return r > 0 ? `${m} 分 ${r} 秒` : `${m} 分`
 }
 
 /** Stream a child process and broadcast its output as a task. */
@@ -40,13 +52,34 @@ export function runAsync(cmd: string, args: string[], cwd: string, label: string
         if (line.trim()) broadcast({ type: 'task', task: { label, status: 'start', code: null, stream, line } })
       }
     }
-    child.stdout?.on('data', emit('stdout'))
-    child.stderr?.on('data', emit('stderr'))
+    // Liveness watchdog: if the child emits nothing for 30s (e.g. npm on a slow
+    // registry), print a line so a slow step never reads as "hung".
+    const started = Date.now()
+    let lastOutput = Date.now()
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastOutput < 30_000) return
+      lastOutput = Date.now()
+      taskLine(label, `[task] 仍在执行中,已运行 ${formatElapsed(Math.round((Date.now() - started) / 1000))} — 暂无新输出,请耐心等待…`)
+    }, 10_000)
+    const stopWatchdog = (): void => clearInterval(watchdog)
+    const touch = (): void => {
+      lastOutput = Date.now()
+    }
+    child.stdout?.on('data', (c) => {
+      touch()
+      emit('stdout')(c)
+    })
+    child.stderr?.on('data', (c) => {
+      touch()
+      emit('stderr')(c)
+    })
     child.on('error', (err) => {
+      stopWatchdog()
       broadcast({ type: 'task', task: { label, status: 'end', code: null } })
       resolve({ ok: false, code: null, error: err.message })
     })
     child.on('close', (code) => {
+      stopWatchdog()
       broadcast({ type: 'task', task: { label, status: 'end', code } })
       resolve({ ok: code === 0, code })
     })
