@@ -35,7 +35,7 @@ function defaults(): LauncherConfig {
     // Anything else targets the portable runtime (sharing the launcher to others).
     installMode: existsSync(harnessRepo) ? 'source' : 'bundled',
     runtimeRoot,
-    nodeVersion: '22.14.0',
+    nodeVersion: '22.20.0',
     dshVersion: '0.1.0-rc.6',
     harnessRepo,
     harnessRepoUrl: 'https://github.com/deepseek-ai/deepseek-harness.git',

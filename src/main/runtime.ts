@@ -2,6 +2,7 @@
 // install under runtimeRoot (~/.dsh-runtime). Target machines need no Node.js,
 // no pnpm, and no harness source checkout.
 
+import { spawn } from 'node:child_process'
 import { createWriteStream, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { get as httpsGet } from 'node:https'
 import { homedir } from 'node:os'
@@ -38,6 +39,35 @@ export function resolveBundledDshBin(): string | null {
 
 export function runtimeInstalled(): boolean {
   return resolveBundledNode() !== null && resolveBundledDshBin() !== null
+}
+
+/** Compare dotted version strings: returns true when a >= b (missing parts = 0). */
+function nodeVersionAtLeast(a: string, b: string): boolean {
+  const pa = a.replace(/^v/, '').split('.').map(Number)
+  const pb = b.replace(/^v/, '').split('.').map(Number)
+  for (let i = 0; i < 3; i++) {
+    const x = pa[i] ?? 0
+    const y = pb[i] ?? 0
+    if (x !== y) return x > y
+  }
+  return true
+}
+
+/** Version of the installed portable Node, or null if absent/unreadable. */
+function installedNodeVersion(): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (!existsSync(nodeExe())) {
+      resolve(null)
+      return
+    }
+    const p = spawn(nodeExe(), ['-v'], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+    let out = ''
+    p.stdout?.on('data', (c: Buffer) => {
+      out += c.toString('utf8')
+    })
+    p.on('error', () => resolve(null))
+    p.on('close', () => resolve(out.trim().replace(/^v/, '') || null))
+  })
 }
 
 /**
@@ -142,7 +172,11 @@ export async function installRuntime(): Promise<CmdResult> {
   const cfg = getConfig()
   const label = 'runtime:install'
   const root = cfg.runtimeRoot
-  const ver = cfg.nodeVersion || '22.14.0'
+  // The DSH team's community red line is Node ≥22.19 (below it, node:zlib lacks
+  // zstd and AbortSignal.timeout) — bump old persisted versions up to the minimum
+  // so the bundled dsh can boot (e.g. existing 22.14 installs self-heal on re-deploy).
+  const MIN_NODE = '22.19.0'
+  const ver = nodeVersionAtLeast(cfg.nodeVersion || '', MIN_NODE) ? cfg.nodeVersion : MIN_NODE
   const dshVer = cfg.dshVersion || '0.1.0-rc.6'
   const dir = nodeDir()
   const stage = join(root, '.node-stage')
@@ -162,10 +196,15 @@ export async function installRuntime(): Promise<CmdResult> {
   const pluginDir = cfg.pluginDir || join(homedir(), 'DSH-Plugin')
   mkdirSync(pluginDir, { recursive: true })
 
-  // 1. portable Node
-  if (existsSync(nodeExe())) {
-    taskLine(label, `[runtime] Node v${ver} 已存在,跳过下载`)
+  // 1. portable Node — skip only when the installed version already satisfies
+  //    the target (dsh needs ≥22.17 for node:zlib zstd); otherwise re-download.
+  const installedNode = await installedNodeVersion()
+  if (installedNode && nodeVersionAtLeast(installedNode, ver)) {
+    taskLine(label, `[runtime] Node v${installedNode} 已存在,跳过下载`)
   } else {
+    if (installedNode) {
+      taskLine(label, `[runtime] Node v${installedNode} 过旧(dsh 需要 ≥${ver}),重新下载…`, 'stderr')
+    }
     taskLine(label, `[runtime] 下载 Node v${ver} …`)
     taskProgress(label, 0.02, '下载 Node(约 30MB)')
     const logDownload = progressLine(label)
@@ -251,6 +290,7 @@ export async function installRuntime(): Promise<CmdResult> {
   const next = setConfig({
     installMode: 'bundled',
     runtimeRoot: root,
+    nodeVersion: ver,
     nodePath: nodeExe(),
     launchArgs: [dshBin()],
     dshHome: cfg.dshHome || join(homedir(), '.dsh'),
