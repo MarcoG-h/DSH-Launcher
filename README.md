@@ -1,58 +1,42 @@
 # DSH Launcher
 
-DeepSeek Harness 的桌面启动器(Electron + React + Tailwind,界面风格参考 CC Switch)。
+> 最方便的 DSH 启动器兼第三方插件管理:一键式安装、客户端界面、快捷的启动与重启。
 
-把「启动 / 重启 / 观察启动日志 / 管理外部插件」这些繁琐操作收敛到一个应用里,启动失败(比如依赖缺失)也能直接在界面里看到原因并一键修复。
+DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的桌面启动器(Electron + React + Tailwind,界面风格参考 CC Switch)。把「安装运行环境、启动、重启、观察日志、管理第三方插件」这些操作收敛到一个本地客户端里,启动失败(比如依赖缺失)也能直接在界面里看到原因并一键修复。
 
-## 功能
+[English README](README.en.md)
 
-- **一键启动 / 停止 / 重启** Harness 的 profile(默认 `web`),并实时显示进程日志
-- **启动前检测端口占用**,避免与已有实例冲突卡死
-- **就绪后自动打开** Web UI(`http://127.0.0.1:3080`),也可手动点击
-- **启动超时保护**(默认 90s,可配置),不会一直卡在「启动中」
-- **插件管理**:
-  - 列出当前 profile 已安装的插件(名称 / 版本 / 是否启用)
-  - 扫描本地插件目录(`~/DSH-Plugin`)列出可用插件,一键安装
-  - 启用 / 停用 / 卸载,底层走 `dsh plugin`(转发给 pnpm 并自动 reconcile bundles)
-- **维护动作**:`修复依赖`(harness 仓库 `pnpm install`,可解决 `zod` 缺失这类启动报错)与 `重新构建`(`pnpm run build`)
-- 路径 / 端口 / profile / 启动命令均可配置,持久化到 `%APPDATA%/dsh-launcher/launcher-config.json`
+## 界面截图
 
-## 环境要求
+![控制台](screenshots/dashboard.png)
 
-- Node.js ≥ 20(建议 22+)
-- pnpm(插件安装与修复依赖会调用)
-- DeepSeek Harness 源码仓库(默认 `C:\Users\Marco\deepseek-harness`,可在设置里改)
+## 功能特性
 
-## 运行
+- **一键式安装 / 快速离线部署** —— 无需安装 Node.js、无需源码,一键部署便携 Node + dsh 运行环境,部署完即可直接使用,全程离线可用。
+- **客户端界面** —— 所有操作都在本地桌面应用内完成;DSH Web 界面可直接嵌入应用内使用(支持中文输入法),无需跳转浏览器。
+- **快捷的启动与重启** —— 一键启动 / 停止 / 重启 dsh,就绪后自动进入 DSH 界面;自动检测外部实例,避免端口冲突。
+- **第三方插件管理** —— 浏览本地插件、安装 / 卸载 / 启用禁用、从 GitHub 一键下载;更新内置 dsh 不会覆盖你的第三方插件与 `cordis.patch.yml`。
+- **余额小部件** —— 主界面直接查看 DeepSeek 账户余额;API 密钥只在本地读取,不落盘、不上传。
+- **启动日志可视化** —— 启动失败(如依赖缺失)时直接在界面看到原因,一键修复。
 
-```sh
-pnpm install        # 首次需要下载 Electron,网络慢时可在 .npmrc 配置 electron_mirror
-pnpm dev            # 开发模式(HMR)
-pnpm build          # 构建 main / preload / renderer 到 out/
+## 运行模式
+
+| 模式 | 说明 |
+| --- | --- |
+| 内置版(推荐) | 「快速离线部署」一键安装便携 Node + dsh,目标机器无需任何前置环境 |
+| 源码版 | 需要本机 Node.js + pnpm,可调试 / 修改 Harness 源码 |
+
+## 开发与构建
+
+```bash
+pnpm install
+pnpm dev        # 开发模式
+pnpm build      # 构建
 ```
 
-启动后界面分三页:
+## 隐私说明
 
-- **控制台**:状态、启动/停止/重启、打开 Web UI、实时日志
-- **插件**:已安装插件 + 本地可用插件 + 按路径/包名安装
-- **设置**:路径与启动参数、自动打开开关、修复依赖 / 重新构建
-
-## 工作原理
-
-- 主进程用 `node apps/cli/lib/bin.js <profile>`(cwd = harness 仓库)拉起 dsh,
-  Windows 上通过 `taskkill /F /T` 杀掉整棵进程树实现停止。
-- 端口就绪探测基于 `net` 轮询;启动前先探测一次端口,被占用则拒绝启动并提示。
-- 插件操作调用 `node apps/cli/lib/bin.js plugin --profile <p> add|remove <spec>`,
-  由 dsh 内部转发给 pnpm 并在成功后把 `dsh.bundle` 插件写进
-  `$DSH_HOME/profiles/<p>/package.json#dsh.profile.bundles`;
-  「启用 / 停用」直接增删该 `bundles` 数组,不卸载依赖。
-
-## 故障排查
-
-- **启动报 `Cannot find package 'zod'` 之类** → 设置页点「修复依赖」,再「重新构建」,最后启动。
-- **提示端口被占用** → 说明已有一个 dsh 实例在跑,先在别处停掉它(启动器只管自己拉起的进程)。
-- **插件安装后未出现在已启用列表** → 装的是声明了 `dsh.bundle` 的包才会自动成为 profile 层;
-  普通库会被安装但标记「无 bundle」。
+- DeepSeek API 密钥仅在主进程本地读取(优先取设置中填写的密钥,否则从 `~/.dsh/.credentials.yaml` 读取),不会写入日志或上传到任何地方。
 
 ## License
 
