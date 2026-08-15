@@ -2,7 +2,7 @@
 
 > 最方便的 DSH 启动器兼第三方插件管理:一键式安装、客户端界面、快捷的启动与重启。
 
-DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的桌面启动器(Electron + React + Tailwind)。把「安装运行环境、启动、重启、观察日志、管理第三方插件」这些操作收敛到一个本地客户端里。
+DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的桌面启动器(Electron + React + Tailwind)。把 |安装运行环境|启动|重启||管理第三方插件|切换API| 这些常用操作收敛到一个本地客户端里。
 
 [English README](README.en.md)
 
@@ -13,10 +13,11 @@ DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 ## 功能特性
 
 - **一键式安装 / 快速离线部署** —— 无需安装 Node.js、无需源码,一键部署便携 Node + dsh 运行环境,部署完即可直接使用,全程离线可用。
+- **快捷API切换** —— 类似于cc-switch，对于想要使用其他非DeepSeek api的用户的选项，可以自定义接入任意厂商，随时切换。
 - **客户端界面** —— 所有操作都在本地桌面应用内完成;DSH Web 界面可直接嵌入应用内使用(支持中文输入法),无需跳转浏览器。
-- **快捷的启动与重启** —— 一键启动 / 停止 / 重启 dsh,就绪后自动进入 DSH 界面;自动检测外部实例,避免端口冲突。
-- **第三方插件管理** —— 浏览本地插件、安装 / 卸载 / 启用禁用、从 GitHub 一键下载;更新内置 dsh 不会覆盖你的第三方插件与 `cordis.patch.yml`。
-- **余额小部件** —— 主界面直接查看 DeepSeek 账户余额;API 密钥只在本地读取,不落盘、不上传。
+- **快捷的启动与重启** —— 一键启动 / 停止 / 重启 dsh,就绪后自动进入 DSH 界面。
+- **第三方插件管理** —— 浏览本地插件、安装 / 卸载 / 启用禁用、从 GitHub 一键下载。插件自动归档存库。
+- **余额小部件** —— 主界面直接查看开放平台账户余额。
 - **启动日志可视化** —— 启动失败(如依赖缺失)时直接在界面看到原因,一键修复。
 
 ## 运行模式
@@ -26,9 +27,9 @@ DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 | 内置版(推荐) | 「快速离线部署」一键安装便携 Node + dsh,目标机器无需任何前置环境 |
 | 源码版 | 需要本机 Node.js + pnpm,可调试 / 修改 Harness 源码 |
 
-## 快速部署教程(全程鼠标点击,无需命令行)
+## 快速部署教程
 
-目标机器**无需安装 Node.js、无需源码**,跟着下面三步即可用上 dsh。
+目标机器什么都不需要准备！跟着下面三步即可用上 dsh。
 
 ### 第 1 步:打开「设置」
 
@@ -47,6 +48,8 @@ DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 回到 **「控制台」**,点击 **「启动」**。就绪后会自动进入 DSH 界面,即可开始使用。
 
 ![第 3 步:点击「启动」](screenshots/quickstart-3-start.png)
+
+关于如何获取API key？请前往[DeepSeek开放平台](https://platform.deepseek.com)。
 
 ### 可选:一键切换 API 厂商
 
