@@ -148,8 +148,13 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
             </p>
           ) : readme?.ok ? (
             <div
-              className="market-md text-[12.5px] leading-relaxed"
-              dangerouslySetInnerHTML={{ __html: renderMarkdown(readme.text ?? '') }}
+              className="market-md"
+              dangerouslySetInnerHTML={{
+                __html: renderMarkdown(readme.text ?? '', {
+                  raw: `https://raw.githubusercontent.com/${repo.fullName}/${repo.defaultBranch}/`,
+                  blob: `https://github.com/${repo.fullName}/blob/${repo.defaultBranch}/`
+                })
+              }}
             />
           ) : (
             <p className="text-[12.5px]" style={{ color: 'var(--warn)' }}>
