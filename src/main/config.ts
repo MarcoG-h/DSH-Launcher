@@ -30,6 +30,7 @@ const DEFAULT_API_PRESETS: ApiPreset[] = [
 function defaults(): LauncherConfig {
   const harnessRepo = firstExisting([process.env.DSH_REPO ?? '', join(home, 'deepseek-harness')])
   const runtimeRoot = join(home, '.dsh-runtime')
+  const systemLang = (app.getLocale() ?? 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en'
   return {
     // A checked-out repo implies we're on the developer machine ⇒ source mode.
     // Anything else targets the portable runtime (sharing the launcher to others).
@@ -50,7 +51,8 @@ function defaults(): LauncherConfig {
     pnpm: 'pnpm',
     startupTimeoutMs: 90000,
     apiPresets: DEFAULT_API_PRESETS.map((p) => ({ ...p })),
-    activeApiPresetId: 'deepseek-official'
+    activeApiPresetId: 'deepseek-official',
+    language: systemLang
   }
 }
 

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, type HarnessState, type LauncherConfig, type LauncherEvent, type LogLine, type TaskLog } from '../lib/api'
+import { getLang, translate } from '../i18n'
 
 const MAX_LOG = 4000
 
@@ -23,19 +24,6 @@ interface HarnessContextValue {
 }
 
 const HarnessContext = createContext<HarnessContextValue | null>(null)
-
-const STATUS_TEXT: Record<string, string> = {
-  stopped: '已停止',
-  starting: '启动中',
-  running: '运行中',
-  stopping: '停止中',
-  error: '异常',
-  external: '外部运行中'
-}
-
-export function statusLabel(status: string | undefined): string {
-  return status ? (STATUS_TEXT[status] ?? status) : '未知'
-}
 
 export function useHarness(): HarnessContextValue {
   const ctx = useContext(HarnessContext)
@@ -122,7 +110,7 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
             lines: t.line ? [...base.lines, { stream: t.stream ?? 'stdout', line: t.line }] : base.lines,
             updatedAt: now,
             progress: done ? (t.code === 0 ? 1 : base.progress) : (t.progress ?? base.progress),
-            phase: done ? (t.code === 0 ? '完成' : base.phase) : (t.phase ?? base.phase)
+            phase: done ? (t.code === 0 ? translate(getLang(), 'task.done') : base.phase) : (t.phase ?? base.phase)
           }
           return { ...prev, [t.label]: next }
         })

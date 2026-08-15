@@ -1,6 +1,6 @@
 {
   "name": "dsh-launcher",
-  "version": "0.1.2",
+  "version": "1.0.0",
   "description": "DeepSeek Harness desktop launcher — start/restart, live logs, plugin management (cc-switch style)",
   "main": "./out/main/index.js",
   "author": "MarcoG-h",
@@ -34,7 +34,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "DSH Launcher"
+      "shortcutName": "DSH Launcher",
+      "multiLanguageInstaller": true,
+      "installerLanguages": ["zh_CN", "en_US"],
+      "displayLanguageSelector": true
     }
   },
   "dependencies": {

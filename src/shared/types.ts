@@ -51,6 +51,8 @@ export interface LauncherConfig {
   apiPresets: ApiPreset[]
   /** Which preset is currently active (its baseUrl is injected into dsh at launch). */
   activeApiPresetId: string
+  /** UI + main-process log language. Defaults from the system locale on first run. */
+  language: 'zh' | 'en'
 }
 
 /** An OpenAI-compatible API vendor preset: model base URL + optional balance endpoint. */

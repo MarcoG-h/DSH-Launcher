@@ -1,18 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { TaskLog } from '../lib/api'
+import { formatDuration, useI18n } from '../i18n'
 
 function lineColor(stream: string, line: string): string {
   if (/error|failed|ELIFECYCLE|Cannot find|ERR_MODULE/i.test(line)) return 'var(--err)'
   if (stream === 'stderr') return 'var(--warn)'
   return '#c3cad4'
-}
-
-function fmtElapsed(ms: number): string {
-  const s = Math.floor(ms / 1000)
-  if (s < 60) return `${s} 秒`
-  const m = Math.floor(s / 60)
-  const r = s % 60
-  return r > 0 ? `${m} 分 ${r} 秒` : `${m} 分`
 }
 
 /** Determinate bar when progress is known; animated when the step is running but indeterminate. */
@@ -36,6 +29,7 @@ function ProgressBar({ progress, running }: { progress: number | null; running: 
 }
 
 export function TaskConsole({ task }: { task: TaskLog }): React.JSX.Element {
+  const { lang, t } = useI18n()
   const ref = useRef<HTMLDivElement>(null)
   const [now, setNow] = useState(() => Date.now())
 
@@ -68,14 +62,18 @@ export function TaskConsole({ task }: { task: TaskLog }): React.JSX.Element {
           </span>
         )}
         <span className="ml-auto text-[11px] shrink-0" style={{ color: 'var(--muted)' }}>
-          {task.running ? `执行中 ${fmtElapsed(elapsed)}` : task.code === 0 ? '完成 (exit 0)' : `失败 (exit ${task.code ?? '?'})`}
+          {task.running
+            ? `${t('task.running.pre')} ${formatDuration(elapsed, lang)}`
+            : task.code === 0
+              ? t('task.doneExit')
+              : t('task.failedExit', { code: task.code ?? '?' })}
         </span>
       </div>
       <ProgressBar progress={task.progress} running={task.running} />
       <div ref={ref} className="log-console overflow-auto max-h-[220px] p-3">
         {task.lines.length === 0 ? (
           <div className="mono text-[12px]" style={{ color: '#5c6370' }}>
-            {task.running ? '等待输出…' : '无输出'}
+            {task.running ? t('task.waiting') : t('task.noOutput')}
           </div>
         ) : (
           task.lines.map((l, i) => (

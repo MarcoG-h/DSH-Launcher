@@ -1,6 +1,7 @@
 import { ipcMain, shell } from 'electron'
 import * as balance from './balance'
 import { getConfig, setConfig } from './config'
+import { t } from './i18n'
 import * as dshview from './dshview'
 import * as harness from './harness'
 import * as plugins from './plugins'
@@ -41,7 +42,7 @@ export function registerIpc(): void {
     return async () => {
       const st = harness.getState().status
       if (st === 'running' || st === 'starting' || st === 'stopping') {
-        return { ok: false, code: null, error: '请先停止 dsh,再安装 / 更新运行环境。' }
+        return { ok: false, code: null, error: t('请先停止 dsh,再安装 / 更新运行环境。', 'Stop dsh first, then install / update the runtime.') }
       }
       return (await fn()) as { ok: boolean; code: number | null; error?: string }
     }

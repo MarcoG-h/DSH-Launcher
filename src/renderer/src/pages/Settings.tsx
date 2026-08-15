@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { api, type ApiPreset, type LauncherConfig } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
+import { useI18n } from '../i18n'
 import { TaskConsole } from '../components/TaskConsole'
 import { DownloadIcon, RefreshIcon, PowerIcon, PlusIcon, TrashIcon } from '../lib/icons'
 
@@ -19,6 +20,7 @@ function Field({ label, value, onChange, mono = true, hint }: { label: string; v
 
 export function Settings(): JSX.Element {
   const { config, saveConfig, tasks, refresh } = useHarness()
+  const { t } = useI18n()
   const [form, setForm] = useState<Partial<LauncherConfig>>({})
   const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
@@ -72,7 +74,7 @@ export function Settings(): JSX.Element {
   }
   const addPreset = (): void => {
     const id = `custom-${Date.now()}`
-    setPresets((ps) => [...ps, { id, name: '新厂商', baseUrl: '', balanceUrl: '', apiKey: '' }])
+    setPresets((ps) => [...ps, { id, name: t('settings.newPresetName'), baseUrl: '', balanceUrl: '', apiKey: '' }])
     setSaved(false)
   }
 
@@ -128,20 +130,19 @@ export function Settings(): JSX.Element {
 
   return (
     <div className="p-5 space-y-5 max-w-[900px]">
-      <h2 className="text-[18px] font-semibold">设置</h2>
+      <h2 className="text-[18px] font-semibold">{t('settings.title')}</h2>
 
       {/* Quick offline deployment (bundled runtime) */}
       <div className="panel p-5 space-y-4">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0 space-y-1">
-            <h3 className="section-title">快速离线部署</h3>
+            <h3 className="section-title">{t('settings.offlineTitle')}</h3>
             <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--muted)' }}>
-              一键装好便携 Node + npm + pnpm + <span className="mono">@deepseek-ai/dsh</span>,部署完成后即可
-              <strong style={{ color: 'var(--text)' }}>直接启动使用 dsh</strong>——目标机器无需安装 Node.js、无需
-              源码,全程离线可用。这是给普通使用者的推荐方式。
+              {t('settings.offlineDesc.pre')}<span className="mono">@deepseek-ai/dsh</span>{t('settings.offlineDesc.mid')}
+              <strong style={{ color: 'var(--text)' }}>{t('settings.offlineDesc.bold')}</strong>{t('settings.offlineDesc.tail')}
             </p>
             <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--muted)' }}>
-              当前模式:
+              {t('settings.currentMode')}
               <span
                 className="badge ml-2"
                 style={
@@ -150,32 +151,32 @@ export function Settings(): JSX.Element {
                     : { color: 'var(--ok)', background: 'color-mix(in srgb, var(--ok) 14%, transparent)' }
                 }
               >
-                {isBundled ? '内置运行环境 · 免装 Node' : '源码版 · 使用本机 Node'}
+                {isBundled ? t('settings.modeBundled') : t('settings.modeSource')}
               </span>
             </p>
             <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--muted)' }}>
-              「更新内置 dsh」只升级内置配套插件,不会覆盖 <span className="mono">~/.dsh</span> 里的第三方插件与
-              <span className="mono"> cordis.patch.yml</span> 手动条目。
+              {t('settings.updateNote.pre')} <span className="mono">~/.dsh</span> {t('settings.updateNote.mid')}
+              <span className="mono"> cordis.patch.yml</span> {t('settings.updateNote.tail')}
             </p>
           </div>
           <div className="flex gap-2 shrink-0">
             <button className="btn btn-primary shrink-0" disabled={rtBusy !== null} onClick={() => void doInstallRuntime()}>
-              <DownloadIcon /> {rtBusy === 'install' ? '部署中…' : '快速离线部署'}
+              <DownloadIcon /> {rtBusy === 'install' ? t('settings.deploying') : t('settings.deployBtn')}
             </button>
             <button className="btn btn-ghost shrink-0" disabled={rtBusy !== null} onClick={() => void doUpdateRuntime()}>
-              <RefreshIcon /> {rtBusy === 'update' ? '更新中…' : '更新内置 dsh'}
+              <RefreshIcon /> {rtBusy === 'update' ? t('settings.updating') : t('settings.updateBtn')}
             </button>
           </div>
         </div>
         {rtDone && (
           <p className="text-[12.5px]" style={{ color: 'var(--ok)' }}>
-            ✔ 部署完成 — 已自动切换为内置模式并回填路径,回到「控制台」点击启动即可直接使用 dsh。
+            {t('settings.deployDone')}
           </p>
         )}
         {runtimeTask && <TaskConsole task={runtimeTask} />}
         {updateTask && <TaskConsole task={updateTask} />}
         <p className="text-[11.5px] leading-relaxed" style={{ color: 'var(--muted)' }}>
-          注意:runtimeRoot 与 DSH_HOME 需位于同一磁盘(内置插件通过 junction 链接)。当前 runtimeRoot =
+          {t('settings.diskNote')}
           <span className="mono"> {form.runtimeRoot || '—'}</span>
         </p>
       </div>
@@ -186,22 +187,21 @@ export function Settings(): JSX.Element {
           className="cursor-pointer select-none text-[12px] font-medium"
           style={{ color: 'var(--muted)' }}
         >
-          ⚠ 源码版:下载 / 更新 Harness 源码(高级 — 不建议新手使用)
+          {t('settings.sourceTitle')}
         </summary>
         <p className="text-[12px] leading-relaxed" style={{ color: 'var(--warn)' }}>
-          仅当你需要调试或改动 Harness 源码时才点这里。普通使用请用上面的「快速离线部署」,不需要源码。
+          {t('settings.sourceDesc')}
         </p>
         <p className="text-[12px] leading-relaxed" style={{ color: 'var(--muted)' }}>
-          会克隆 / 更新 <span className="mono">{form.harnessRepoUrl}</span> 到{' '}
-          <span className="mono">{form.harnessRepo}</span> 并安装依赖、自动配置路径。需要本机已有 Node 与 pnpm;
-          若目录已存在则执行 <span className="mono">git pull</span> + <span className="mono">pnpm install</span>。
+          {t('settings.sourceDesc2.pre')} <span className="mono">{form.harnessRepoUrl}</span> {t('settings.sourceDesc2.to')}{' '}
+          <span className="mono">{form.harnessRepo}</span> {t('settings.sourceDesc2.mid')} <span className="mono">git pull</span> + <span className="mono">pnpm install</span>{t('settings.sourceDesc2.tail')}
         </p>
         <button className="btn btn-ghost btn-sm" disabled={dlBusy} onClick={() => void doDownload()}>
-          <DownloadIcon /> {dlBusy ? '下载中…' : '下载 / 更新源码'}
+          <DownloadIcon /> {dlBusy ? t('settings.downloading') : t('settings.downloadBtn')}
         </button>
         {dlDone && (
           <p className="text-[12px]" style={{ color: 'var(--ok)' }}>
-            ✔ 完成 — 路径已自动配置。
+            {t('settings.downloadDone')}
           </p>
         )}
         {downloadTask && <TaskConsole task={downloadTask} />}
@@ -210,37 +210,37 @@ export function Settings(): JSX.Element {
 
       {/* Paths */}
       <div className="panel p-5 space-y-4">
-        <h3 className="section-title">路径与启动</h3>
+        <h3 className="section-title">{t('settings.pathsTitle')}</h3>
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
-            <label className="label">运行模式</label>
+            <label className="label">{t('settings.runMode')}</label>
             <select className="input" value={form.installMode ?? 'bundled'} onChange={(e) => set('installMode')(e.target.value)}>
-              <option value="bundled">内置运行环境(免装 Node)</option>
-              <option value="source">源码版(本机 Node + 源码仓库)</option>
+              <option value="bundled">{t('settings.modeOptionBundled')}</option>
+              <option value="source">{t('settings.modeOptionSource')}</option>
             </select>
           </div>
-          <Field label="运行环境目录 runtimeRoot" value={form.runtimeRoot ?? ''} onChange={set('runtimeRoot')} hint="便携 Node + 内置 dsh 的安装位置" />
-          <Field label="Harness 仓库" value={form.harnessRepo ?? ''} onChange={set('harnessRepo')} hint="dsh CLI 源码所在目录(源码版用)" />
-          <Field label="Harness 仓库 URL" value={form.harnessRepoUrl ?? ''} onChange={set('harnessRepoUrl')} hint="一键下载 / 更新源码时使用的克隆地址" />
-          <Field label="DSH_HOME" value={form.dshHome ?? ''} onChange={set('dshHome')} hint="profiles/sessions/storages 所在目录" />
-          <Field label="本地插件目录" value={form.pluginDir ?? ''} onChange={set('pluginDir')} hint="扫描可用插件的目录(如 DSH-Plugin)" />
-          <Field label="DeepSeek API Key(可选)" value={form.deepseekApiKey ?? ''} onChange={set('deepseekApiKey')} mono={false} hint="余额小部件专用;留空则读取 ~/.dsh/.credentials.yaml" />
+          <Field label={t('settings.runtimeRoot')} value={form.runtimeRoot ?? ''} onChange={set('runtimeRoot')} hint={t('settings.runtimeRootHint')} />
+          <Field label={t('settings.harnessRepo')} value={form.harnessRepo ?? ''} onChange={set('harnessRepo')} hint={t('settings.harnessRepoHint')} />
+          <Field label={t('settings.harnessRepoUrl')} value={form.harnessRepoUrl ?? ''} onChange={set('harnessRepoUrl')} hint={t('settings.harnessRepoUrlHint')} />
+          <Field label={t('settings.dshHome')} value={form.dshHome ?? ''} onChange={set('dshHome')} hint={t('settings.dshHomeHint')} />
+          <Field label={t('settings.pluginDir')} value={form.pluginDir ?? ''} onChange={set('pluginDir')} hint={t('settings.pluginDirHint')} />
+          <Field label={t('settings.deepseekApiKey')} value={form.deepseekApiKey ?? ''} onChange={set('deepseekApiKey')} mono={false} hint={t('settings.deepseekApiKeyHint')} />
           <div>
-            <label className="label">端口</label>
+            <label className="label">{t('settings.port')}</label>
             <input className="input mono" type="number" value={form.port ?? 3080} onChange={(e) => set('port')(Number(e.target.value) || 3080)} />
           </div>
-          <Field label="profile" value={form.profile ?? ''} onChange={set('profile')} hint="启动的 profile 名(默认 web)" />
-          <Field label="node 可执行文件" value={form.nodePath ?? ''} onChange={set('nodePath')} />
+          <Field label={t('settings.profile')} value={form.profile ?? ''} onChange={set('profile')} hint={t('settings.profileHint')} />
+          <Field label={t('settings.nodePath')} value={form.nodePath ?? ''} onChange={set('nodePath')} />
         </div>
         <Field
-          label="启动命令(launchArgs,空格分隔)"
+          label={t('settings.launchArgs')}
           value={(form.launchArgs ?? []).join(' ')}
           onChange={(v) => set('launchArgs')(v.split(/\s+/).filter(Boolean))}
-          hint={`最终: ${form.nodePath ?? 'node'} ${[...(form.launchArgs ?? []), form.profile ?? 'web'].join(' ')}`}
+          hint={`${t('settings.launchArgsHint')} ${form.nodePath ?? 'node'} ${[...(form.launchArgs ?? []), form.profile ?? 'web'].join(' ')}`}
         />
         <div className="grid sm:grid-cols-2 gap-4">
-          <Field label="构建命令" value={form.buildCmd ?? ''} onChange={set('buildCmd')} />
-          <Field label="pnpm 可执行文件" value={form.pnpm ?? ''} onChange={set('pnpm')} />
+          <Field label={t('settings.buildCmd')} value={form.buildCmd ?? ''} onChange={set('buildCmd')} />
+          <Field label={t('settings.pnpm')} value={form.pnpm ?? ''} onChange={set('pnpm')} />
         </div>
         <div className="flex flex-wrap gap-6 pt-1">
           <label className="flex items-center gap-2 text-[13px] cursor-pointer">
@@ -249,12 +249,12 @@ export function Settings(): JSX.Element {
               checked={form.stopOnQuit ?? true}
               onChange={(e) => set('stopOnQuit')(e.target.checked)}
             />
-            关闭应用时停止 Harness 进程
+            {t('settings.stopOnQuit')}
           </label>
         </div>
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
-            <label className="label">启动超时(毫秒)</label>
+            <label className="label">{t('settings.startupTimeout')}</label>
             <input
               className="input mono"
               type="number"
@@ -265,7 +265,7 @@ export function Settings(): JSX.Element {
         </div>
         <div className="pt-1">
           <button className="btn btn-primary" onClick={() => void doSave()}>
-            {saved ? '已保存 ✓' : '保存设置'}
+            {saved ? t('settings.saved') : t('settings.save')}
           </button>
         </div>
       </div>
@@ -273,16 +273,15 @@ export function Settings(): JSX.Element {
       {/* API vendor presets */}
       <div className="panel p-5 space-y-4">
         <div className="space-y-1">
-          <h3 className="section-title">API 切换</h3>
+          <h3 className="section-title">{t('settings.apiTitle')}</h3>
           <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--muted)' }}>
-            在多个 AI 厂商预设之间一键切换。切换后需重启 dsh 生效 —— 启动时会自动注入该厂商的地址和 API
-            Key(同时用于余额查询),无需再去 DSH 界面填。预设没填 Key 时,沿用 <span className="mono">~/.dsh/.credentials.yaml</span> 里已有的。
+            {t('settings.apiDesc')} <span className="mono">~/.dsh/.credentials.yaml</span>{t('settings.apiDesc.tail')}
           </p>
         </div>
         <div className="space-y-3">
           {presets.length === 0 && (
             <p className="text-[12.5px]" style={{ color: 'var(--muted)' }}>
-              暂无预设,点击下方「添加预设」创建一个。
+              {t('settings.noPresets')}
             </p>
           )}
           {presets.map((p) => {
@@ -301,20 +300,20 @@ export function Settings(): JSX.Element {
                     <input
                       className="input mono"
                       value={p.name}
-                      placeholder="厂商名称"
+                      placeholder={t('settings.presetNamePlaceholder')}
                       onChange={(e) => updatePreset(p.id, { name: e.target.value })}
                       style={{ width: 180 }}
                     />
                     {isActive && (
                       <span className="badge" style={{ color: '#fff', background: 'var(--accent)' }}>
-                        当前
+                        {t('settings.current')}
                       </span>
                     )}
                   </div>
                   <div className="flex gap-2">
                     {!isActive && (
                       <button className="btn btn-ghost btn-sm" onClick={() => setActivePreset(p.id)}>
-                        设为当前
+                        {t('settings.setActive')}
                       </button>
                     )}
                     <button
@@ -322,13 +321,13 @@ export function Settings(): JSX.Element {
                       onClick={() => removePreset(p.id)}
                       disabled={presets.length <= 1}
                     >
-                      <TrashIcon /> 删除
+                      <TrashIcon /> {t('settings.delete')}
                     </button>
                   </div>
                 </div>
                 <div className="grid sm:grid-cols-2 gap-2.5">
                   <div>
-                    <label className="label">模型 API 地址 (baseUrl)</label>
+                    <label className="label">{t('settings.baseUrl')}</label>
                     <input
                       className="input mono"
                       value={p.baseUrl}
@@ -337,7 +336,7 @@ export function Settings(): JSX.Element {
                     />
                   </div>
                   <div>
-                    <label className="label">余额接口 (balanceUrl,可留空)</label>
+                    <label className="label">{t('settings.balanceUrl')}</label>
                     <input
                       className="input mono"
                       value={p.balanceUrl}
@@ -346,7 +345,7 @@ export function Settings(): JSX.Element {
                     />
                   </div>
                   <div className="sm:col-span-2">
-                    <label className="label">API Key(注入 dsh 供模型调用 + 余额查询)</label>
+                    <label className="label">{t('settings.apiKey')}</label>
                     <input
                       className="input mono"
                       type="password"
@@ -362,10 +361,10 @@ export function Settings(): JSX.Element {
         </div>
         <div className="flex items-center gap-2">
           <button className="btn btn-ghost btn-sm" onClick={addPreset}>
-            <PlusIcon /> 添加预设
+            <PlusIcon /> {t('settings.addPreset')}
           </button>
           <button className="btn btn-primary btn-sm" onClick={() => void doSave()}>
-            {saved ? '已保存 ✓' : '保存设置'}
+            {saved ? t('settings.saved') : t('settings.save')}
           </button>
         </div>
       </div>
@@ -373,16 +372,16 @@ export function Settings(): JSX.Element {
       {/* Maintenance — source mode only */}
       {!isBundled && (
         <div className="panel p-5 space-y-4">
-          <h3 className="section-title">维护(源码版)</h3>
+          <h3 className="section-title">{t('settings.maintenanceTitle')}</h3>
           <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--muted)' }}>
-            依赖缺失(如上次的 <span className="mono">zod</span> 报错)或源码改动后,需要先在仓库内重新安装 / 构建,再启动。
+            {t('settings.maintenanceDesc.pre')} <span className="mono">zod</span>{t('settings.maintenanceDesc.tail')}
           </p>
           <div className="flex gap-2">
             <button className="btn btn-ghost" disabled={busy !== null} onClick={() => void run('repair', api.repairDeps)}>
-              <RefreshIcon /> 修复依赖 (pnpm install)
+              <RefreshIcon /> {t('settings.repair')}
             </button>
             <button className="btn btn-ghost" disabled={busy !== null} onClick={() => void run('build', api.rebuild)}>
-              <PowerIcon /> 重新构建 (pnpm run build)
+              <PowerIcon /> {t('settings.rebuild')}
             </button>
           </div>
           {repairTask && (

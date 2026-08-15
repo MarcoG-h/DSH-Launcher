@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { JSX } from 'react'
 import { api, type PluginListResult } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
+import { useI18n } from '../i18n'
 import { TrashIcon, PlayIcon, DownloadIcon } from '../lib/icons'
 import { TaskConsole } from '../components/TaskConsole'
 import { parseGitHubUrl } from '../../../shared/github'
 
 export function Plugins(): JSX.Element {
   const { config, tasks } = useHarness()
+  const { t } = useI18n()
   const [data, setData] = useState<PluginListResult | null>(null)
   const [spec, setSpec] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
@@ -76,7 +78,7 @@ export function Plugins(): JSX.Element {
   return (
     <div className="p-5 space-y-5 max-w-[1000px]">
       <div className="flex items-center gap-2">
-        <h2 className="text-[18px] font-semibold">第三方插件管理</h2>
+        <h2 className="text-[18px] font-semibold">{t('plugins.title')}</h2>
         <span className="badge" style={{ color: 'var(--muted)', background: 'var(--bg-soft)' }}>
           profile: {config?.profile}
         </span>
@@ -84,7 +86,7 @@ export function Plugins(): JSX.Element {
 
       {/* Install */}
       <div className="panel p-4">
-        <label className="label">安装插件 — GitHub 仓库地址 / 本地路径 / npm 包名</label>
+        <label className="label">{t('plugins.installLabel')}</label>
         <div className="flex gap-2">
           <input
             className="input"
@@ -96,16 +98,16 @@ export function Plugins(): JSX.Element {
             }}
           />
           <button className="btn btn-primary shrink-0" disabled={!spec.trim() || busy !== null} onClick={doInstall}>
-            {gh ? <DownloadIcon /> : <PlayIcon />} {gh ? '下载并安装' : '安装'}
+            {gh ? <DownloadIcon /> : <PlayIcon />} {gh ? t('plugins.downloadInstall') : t('plugins.install')}
           </button>
         </div>
         {gh ? (
           <p className="mt-2 text-[12px]" style={{ color: 'var(--accent)' }}>
-            将以 GitHub 方式克隆到 <span className="mono">{config?.pluginDir}/{gh.repo}</span> 并安装到 profile {config?.profile}。
+            {t('plugins.ghHint.pre')} <span className="mono">{config?.pluginDir}/{gh.repo}</span> {t('plugins.ghHint.tail', { profile: config?.profile ?? 'web' })}
           </p>
         ) : (
           <p className="mt-2 text-[12px]" style={{ color: 'var(--muted)' }}>
-            支持 <span className="mono">https://github.com/owner/repo</span>、<span className="mono">github:owner/repo</span>、本地路径或 npm 包名。
+            {t('plugins.specHint.pre')} <span className="mono">https://github.com/owner/repo</span>{t('plugins.specHint.sep')}<span className="mono">github:owner/repo</span>{t('plugins.specHint.tail')}
           </p>
         )}
         {error && <p className="mt-2 text-[12px]" style={{ color: 'var(--err)' }}>{error}</p>}
@@ -119,11 +121,11 @@ export function Plugins(): JSX.Element {
       {/* Installed */}
       <section>
         <div className="flex items-center justify-between mb-2.5">
-          <h3 className="section-title">已安装 · {installed.length}</h3>
+          <h3 className="section-title">{t('plugins.installedTitle', { count: installed.length })}</h3>
         </div>
         {installed.length === 0 ? (
           <div className="card p-5 text-[13px]" style={{ color: 'var(--muted)' }}>
-            该 profile 还没有安装外部插件。
+            {t('plugins.noInstalled')}
           </div>
         ) : (
           <div className="grid gap-2.5">
@@ -140,16 +142,16 @@ export function Plugins(): JSX.Element {
                       )}
                       {p.enabled ? (
                         <span className="badge" style={{ color: 'var(--ok)', background: 'color-mix(in srgb, var(--ok) 14%, transparent)' }}>
-                          <span className="badge-dot" style={{ background: 'var(--ok)' }} /> 已启用
+                          <span className="badge-dot" style={{ background: 'var(--ok)' }} /> {t('plugins.enabled')}
                         </span>
                       ) : (
                         <span className="badge" style={{ color: 'var(--muted)', background: 'var(--bg-soft)' }}>
-                          未启用
+                          {t('plugins.disabled')}
                         </span>
                       )}
                       {!p.isBundle && (
                         <span className="badge" style={{ color: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 12%, transparent)' }}>
-                          无 bundle
+                          {t('plugins.noBundle')}
                         </span>
                       )}
                     </div>
@@ -169,7 +171,7 @@ export function Plugins(): JSX.Element {
                         disabled={busy !== null}
                         onClick={() => void run(`toggle:${p.name}`, () => api.setPluginEnabled(p.name, false))}
                       >
-                        停用
+                        {t('plugins.disable')}
                       </button>
                     ) : (
                       <button
@@ -177,20 +179,20 @@ export function Plugins(): JSX.Element {
                         disabled={busy !== null}
                         onClick={() => void run(`toggle:${p.name}`, () => api.setPluginEnabled(p.name, true))}
                       >
-                        启用
+                        {t('plugins.enable')}
                       </button>
                     )}
                     <button
                       className="btn btn-danger btn-sm"
                       disabled={busy !== null}
-                      title="卸载插件"
+                      title={t('plugins.uninstallTitle')}
                       onClick={() => {
-                        if (window.confirm(`卸载插件 ${p.name}?`)) {
+                        if (window.confirm(t('plugins.confirmRemove', { name: p.name }))) {
                           void run(`remove:${p.name}`, () => api.removePlugin(p.name))
                         }
                       }}
                     >
-                      <TrashIcon /> 卸载
+                      <TrashIcon /> {t('plugins.uninstall')}
                     </button>
                   </div>
                 </div>
@@ -203,14 +205,14 @@ export function Plugins(): JSX.Element {
       {/* Local available */}
       <section>
         <div className="flex items-center justify-between mb-2.5">
-          <h3 className="section-title">本地可用 · {local.length}</h3>
+          <h3 className="section-title">{t('plugins.localTitle', { count: local.length })}</h3>
           <span className="text-[11px]" style={{ color: 'var(--muted)' }}>
             {config?.pluginDir}
           </span>
         </div>
         {local.length === 0 ? (
           <div className="card p-5 text-[13px]" style={{ color: 'var(--muted)' }}>
-            未在插件目录发现插件({config?.pluginDir})。
+            {t('plugins.noLocal', { dir: config?.pluginDir ?? '' })}
           </div>
         ) : (
           <div className="grid gap-2.5">
@@ -227,15 +229,15 @@ export function Plugins(): JSX.Element {
                       )}
                       {p.status === 'enabled' ? (
                         <span className="badge" style={{ color: 'var(--ok)', background: 'color-mix(in srgb, var(--ok) 14%, transparent)' }}>
-                          <span className="badge-dot" style={{ background: 'var(--ok)' }} /> 已启用
+                          <span className="badge-dot" style={{ background: 'var(--ok)' }} /> {t('plugins.enabled')}
                         </span>
                       ) : p.status === 'installed' ? (
                         <span className="badge" style={{ color: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 12%, transparent)' }}>
-                          已安装 · 未启用
+                          {t('plugins.installedNotEnabled')}
                         </span>
                       ) : (
                         <span className="badge" style={{ color: 'var(--muted)', background: 'var(--bg-soft)' }}>
-                          未安装
+                          {t('plugins.notInstalled')}
                         </span>
                       )}
                       {p.isBundle ? (
@@ -244,7 +246,7 @@ export function Plugins(): JSX.Element {
                         </span>
                       ) : (
                         <span className="badge" style={{ color: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 12%, transparent)' }}>
-                          无 bundle
+                          {t('plugins.noBundle')}
                         </span>
                       )}
                     </div>
@@ -264,7 +266,7 @@ export function Plugins(): JSX.Element {
                         disabled={busy !== null}
                         onClick={() => void run(`install:${p.path}`, () => api.installPlugin(p.path))}
                       >
-                        <PlayIcon /> 安装
+                        <PlayIcon /> {t('plugins.install')}
                       </button>
                     ) : p.status === 'installed' ? (
                       <button
@@ -272,11 +274,11 @@ export function Plugins(): JSX.Element {
                         disabled={busy !== null}
                         onClick={() => void run(`toggle:${p.name}`, () => api.setPluginEnabled(p.name, true))}
                       >
-                        启用
+                        {t('plugins.enable')}
                       </button>
                     ) : (
                       <span className="btn btn-ghost btn-sm" style={{ cursor: 'default' }}>
-                        已启用
+                        {t('plugins.enabled')}
                       </span>
                     )}
                   </div>

@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFi
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { getConfig, setConfig } from './config'
+import { t } from './i18n'
 import { bundledEnv, resolveBundledNode } from './runtime'
 import { runAsync, taskDone, taskLine } from './task'
 import { parseGitHubUrl } from '../shared/github'
@@ -165,7 +166,7 @@ export function setEnabled(profile: string, name: string, enabled: boolean): { o
 /** `pnpm install` in the harness repo — repairs missing deps like zod. */
 export function repairDeps(): Promise<CmdResult> {
   if (getConfig().installMode === 'bundled') {
-    return Promise.resolve({ ok: false, code: 1, error: '内置模式下无需修复源码依赖' })
+    return Promise.resolve({ ok: false, code: 1, error: t('内置模式下无需修复源码依赖', 'No need to repair source deps in bundled mode') })
   }
   return pnpmCmd(['install'], getConfig().harnessRepo, 'repair')
 }
@@ -174,7 +175,7 @@ export function repairDeps(): Promise<CmdResult> {
 export function rebuild(): Promise<CmdResult> {
   const cfg = getConfig()
   if (cfg.installMode === 'bundled') {
-    return Promise.resolve({ ok: false, code: 1, error: '内置模式下无需重新构建源码' })
+    return Promise.resolve({ ok: false, code: 1, error: t('内置模式下无需重新构建源码', 'No need to rebuild the source in bundled mode') })
   }
   const tokens = cfg.buildCmd.trim().split(/\s+/)
   const cmd = tokens[0] ?? 'pnpm'
@@ -197,9 +198,9 @@ export async function downloadHarness(): Promise<CmdResult> {
   const isGit = existsSync(join(target, '.git'))
   if (isGit) {
     const pull = await runAsync('git', ['-C', target, 'pull', '--ff-only'], process.cwd(), label, process.platform === 'win32')
-    if (!pull.ok) taskLine(label, '[download] 拉取未完成(可能有本地改动),继续使用现有代码。', 'stderr')
+    if (!pull.ok) taskLine(label, t('[download] 拉取未完成(可能有本地改动),继续使用现有代码。', '[download] Pull incomplete (possible local changes); using existing code.'), 'stderr')
   } else if (existsSync(target) && readdirSync(target).length > 0) {
-    taskLine(label, '[download] 目标目录非空且非 git 仓库,跳过克隆,仅安装依赖。', 'stderr')
+    taskLine(label, t('[download] 目标目录非空且非 git 仓库,跳过克隆,仅安装依赖。', '[download] Target dir is non-empty and not a git repo; skipping clone, installing deps only.'), 'stderr')
     taskDone(label, 0)
   } else {
     const clone = await runAsync('git', ['clone', url, target], process.cwd(), label, process.platform === 'win32')
@@ -209,7 +210,7 @@ export async function downloadHarness(): Promise<CmdResult> {
     }
   }
 
-  taskLine(label, '[download] 安装依赖 (pnpm install)…')
+  taskLine(label, t('[download] 安装依赖 (pnpm install)…', '[download] Installing dependencies (pnpm install)…'))
   const install = await pnpmCmd(['install'], target, 'repair')
   if (!install.ok) {
     taskDone(label, install.code ?? 1)
@@ -227,8 +228,8 @@ export async function downloadHarness(): Promise<CmdResult> {
     nodePath: cfg.nodePath || 'node',
     port: cfg.port || 3080
   })
-  taskLine(label, `[download] ✔ 完成 — harnessRepo=${next.harnessRepo}`)
-  taskLine(label, `[download] 启动命令: ${next.nodePath} ${[...next.launchArgs, next.profile].join(' ')}`)
+  taskLine(label, t(`[download] ✔ 完成 — harnessRepo=${next.harnessRepo}`, `[download] ✔ Done — harnessRepo=${next.harnessRepo}`))
+  taskLine(label, t(`[download] 启动命令: ${next.nodePath} ${[...next.launchArgs, next.profile].join(' ')}`, `[download] Launch command: ${next.nodePath} ${[...next.launchArgs, next.profile].join(' ')}`))
   taskDone(label, 0)
   return { ok: true, code: 0 }
 }
@@ -240,7 +241,7 @@ export async function downloadHarness(): Promise<CmdResult> {
 export async function downloadPlugin(url: string): Promise<CmdResult> {
   const cfg = getConfig()
   const gh = parseGitHubUrl(url)
-  if (!gh) return { ok: false, code: null, error: `无法识别的 GitHub 地址: ${url}` }
+  if (!gh) return { ok: false, code: null, error: t(`无法识别的 GitHub 地址: ${url}`, `Unrecognized GitHub URL: ${url}`) }
   const label = `clone:${gh.repo}`
   const target = join(cfg.pluginDir, gh.repo)
 
@@ -248,7 +249,7 @@ export async function downloadPlugin(url: string): Promise<CmdResult> {
 
   if (existsSync(join(target, '.git'))) {
     const pull = await runAsync('git', ['-C', target, 'pull', '--ff-only'], process.cwd(), label, process.platform === 'win32')
-    if (!pull.ok) taskLine(label, '[download] 拉取未完成,使用现有代码。', 'stderr')
+    if (!pull.ok) taskLine(label, t('[download] 拉取未完成,使用现有代码。', '[download] Pull incomplete; using existing code.'), 'stderr')
   } else {
     const args = ['clone', gh.cloneUrl, target]
     if (gh.ref) args.push('--branch', gh.ref)
@@ -259,7 +260,7 @@ export async function downloadPlugin(url: string): Promise<CmdResult> {
     }
   }
 
-  taskLine(label, `[download] 已就绪: ${target} → 安装到 profile "${cfg.profile}"`)
+  taskLine(label, t(`[download] 已就绪: ${target} → 安装到 profile "${cfg.profile}"`, `[download] Ready: ${target} → installing into profile "${cfg.profile}"`))
   taskDone(label, 0)
   return install(cfg.profile, target)
 }

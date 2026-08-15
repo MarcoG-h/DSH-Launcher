@@ -1,6 +1,7 @@
 import type { JSX } from 'react'
 import { useHarness } from '../hooks/useHarness'
 import { useTheme } from '../hooks/useTheme'
+import { useI18n } from '../i18n'
 import {
   TerminalIcon,
   PuzzleIcon,
@@ -24,6 +25,7 @@ interface SidebarProps {
 export function Sidebar({ view, setView, collapsed, setCollapsed }: SidebarProps): JSX.Element {
   const { state, config, runningTasks } = useHarness()
   const [theme, toggleTheme] = useTheme()
+  const { lang, t, setLang } = useI18n()
 
   // The DSH view is only reachable once the port is actually ready. The status
   // dot only shows when something is wrong — red for a harness error, yellow
@@ -33,10 +35,10 @@ export function Sidebar({ view, setView, collapsed, setCollapsed }: SidebarProps
   const showStatus = status === 'error' || status === 'external'
 
   const items: { id: PageId | 'dsh'; label: string; icon: JSX.Element; disabled?: boolean }[] = [
-    { id: 'dsh', label: 'DSH 界面', icon: <PanelIcon />, disabled: !ready },
-    { id: 'dashboard', label: '控制台', icon: <TerminalIcon /> },
-    { id: 'plugins', label: '第三方插件管理', icon: <PuzzleIcon /> },
-    { id: 'settings', label: '设置', icon: <GearIcon /> }
+    { id: 'dsh', label: t('nav.dsh'), icon: <PanelIcon />, disabled: !ready },
+    { id: 'dashboard', label: t('nav.dashboard'), icon: <TerminalIcon /> },
+    { id: 'plugins', label: t('nav.plugins'), icon: <PuzzleIcon /> },
+    { id: 'settings', label: t('nav.settings'), icon: <GearIcon /> }
   ]
 
   const width = collapsed ? 56 : 212
@@ -96,7 +98,7 @@ export function Sidebar({ view, setView, collapsed, setCollapsed }: SidebarProps
           <div
             className="text-[11px] mono text-center"
             style={{ color: 'var(--accent)' }}
-            title={`${runningTasks.length} 个任务进行中`}
+            title={t('sidebar.tasksRunning', { count: runningTasks.length })}
           >
             ⚙{runningTasks.length}
           </div>
@@ -107,12 +109,19 @@ export function Sidebar({ view, setView, collapsed, setCollapsed }: SidebarProps
           </div>
         )}
         <div className={`flex items-center justify-center gap-1 pt-0.5 ${collapsed ? 'flex-col' : ''}`}>
-          <button className="btn btn-ghost btn-sm !p-1.5" title={theme === 'dark' ? '切换到浅色' : '切换到深色'} onClick={toggleTheme}>
+          <button className="btn btn-ghost btn-sm !p-1.5" title={theme === 'dark' ? t('sidebar.switchLight') : t('sidebar.switchDark')} onClick={toggleTheme}>
             {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
           </button>
           <button
             className="btn btn-ghost btn-sm !p-1.5"
-            title={collapsed ? '展开侧边栏' : '折叠侧边栏'}
+            title={t('sidebar.switchLang')}
+            onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+          >
+            {lang === 'zh' ? 'EN' : '中'}
+          </button>
+          <button
+            className="btn btn-ghost btn-sm !p-1.5"
+            title={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}
             onClick={() => setCollapsed(!collapsed)}
           >
             <ChevronIcon dir={collapsed ? 'right' : 'left'} />
@@ -120,7 +129,7 @@ export function Sidebar({ view, setView, collapsed, setCollapsed }: SidebarProps
         </div>
         {!collapsed && (
           <div className="text-[11px] text-center" style={{ color: 'var(--muted)' }}>
-            profile <span className="mono">{config?.profile ?? 'web'}</span> · 端口 {config?.port ?? 3080}
+            profile <span className="mono">{config?.profile ?? 'web'}</span> {t('sidebar.portLabel')} {config?.port ?? 3080}
           </div>
         )}
       </div>

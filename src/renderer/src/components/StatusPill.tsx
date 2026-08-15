@@ -1,4 +1,4 @@
-import { statusLabel } from '../hooks/useHarness'
+import { useI18n } from '../i18n'
 
 const STYLES: Record<string, { color: string; pulse: boolean }> = {
   running: { color: 'var(--ok)', pulse: false },
@@ -10,6 +10,7 @@ const STYLES: Record<string, { color: string; pulse: boolean }> = {
 }
 
 export function StatusPill({ status, compact }: { status: string | undefined; compact?: boolean }): React.JSX.Element {
+  const { statusLabel } = useI18n()
   const s = STYLES[status ?? 'stopped'] ?? STYLES.stopped
   return (
     <span

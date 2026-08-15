@@ -8,6 +8,7 @@ import { get as httpsGet } from 'node:https'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { getConfig, setConfig } from './config'
+import { t } from './i18n'
 import { runAsync, taskDone, taskLine, taskProgress } from './task'
 import type { CmdResult } from '../shared/types'
 
@@ -97,7 +98,7 @@ function downloadFile(url: string, dest: string, onProgress: (received: number, 
     const armStall = (): void => {
       if (stalled) clearTimeout(stalled)
       stalled = setTimeout(() => {
-        req.destroy(new Error('下载超时(60 秒无数据)— 请检查网络后重试'))
+        req.destroy(new Error(t('下载超时(60 秒无数据)— 请检查网络后重试', 'Download timed out (60s with no data) — check your network and retry')))
       }, 60_000)
     }
     const disarmStall = (): void => {
@@ -155,7 +156,7 @@ function progressLine(label: string): (received: number, total: number | null) =
     last = received
     const mb = (received / 1024 / 1024).toFixed(1)
     const tot = total ? ` / ${(total / 1024 / 1024).toFixed(1)}MB` : ''
-    taskLine(label, `[runtime] 下载中 ${mb}MB${tot}…`)
+    taskLine(label, t(`[runtime] 下载中 ${mb}MB${tot}…`, `[runtime] Downloading ${mb}MB${tot}…`))
   }
 }
 
@@ -189,7 +190,7 @@ export async function installRuntime(): Promise<CmdResult> {
   const npmOpts = ['--no-fund', '--no-audit', '--engine-strict=false', `--registry=${REGISTRY}`]
 
   mkdirSync(root, { recursive: true })
-  taskLine(label, `[runtime] 目标目录: ${root}`)
+  taskLine(label, t(`[runtime] 目标目录: ${root}`, `[runtime] Target directory: ${root}`))
 
   // Ensure the plugin directory exists too, so a fresh install isn't left with
   // a dangling Settings path (plugins.ts only creates it on first GitHub install).
@@ -200,13 +201,13 @@ export async function installRuntime(): Promise<CmdResult> {
   //    the target (dsh needs ≥22.17 for node:zlib zstd); otherwise re-download.
   const installedNode = await installedNodeVersion()
   if (installedNode && nodeVersionAtLeast(installedNode, ver)) {
-    taskLine(label, `[runtime] Node v${installedNode} 已存在,跳过下载`)
+    taskLine(label, t(`[runtime] Node v${installedNode} 已存在,跳过下载`, `[runtime] Node v${installedNode} already present, skipping download`))
   } else {
     if (installedNode) {
-      taskLine(label, `[runtime] Node v${installedNode} 过旧(dsh 需要 ≥${ver}),重新下载…`, 'stderr')
+      taskLine(label, t(`[runtime] Node v${installedNode} 过旧(dsh 需要 ≥${ver}),重新下载…`, `[runtime] Node v${installedNode} is too old (dsh needs ≥${ver}), re-downloading…`), 'stderr')
     }
-    taskLine(label, `[runtime] 下载 Node v${ver} …`)
-    taskProgress(label, 0.02, '下载 Node(约 30MB)')
+    taskLine(label, t(`[runtime] 下载 Node v${ver} …`, `[runtime] Downloading Node v${ver} …`))
+    taskProgress(label, 0.02, t('下载 Node(约 30MB)', 'Downloading Node (~30MB)'))
     const logDownload = progressLine(label)
     // Throttle the bar to ~1% buckets so per-chunk progress doesn't flood IPC.
     let lastBucket = -1
@@ -218,23 +219,23 @@ export async function installRuntime(): Promise<CmdResult> {
         const bucket = Math.floor(pct * 100)
         if (bucket !== lastBucket) {
           lastBucket = bucket
-          taskProgress(label, 0.02 + 0.38 * pct, '下载 Node')
+          taskProgress(label, 0.02 + 0.38 * pct, t('下载 Node', 'Downloading Node'))
         }
       })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      taskLine(label, `[runtime] 下载失败: ${message}`, 'stderr')
+      taskLine(label, t(`[runtime] 下载失败: ${message}`, `[runtime] Download failed: ${message}`), 'stderr')
       taskDone(label, 1)
-      return { ok: false, code: 1, error: `下载 Node 失败: ${message}` }
+      return { ok: false, code: 1, error: t(`下载 Node 失败: ${message}`, `Failed to download Node: ${message}`) }
     }
 
-    taskLine(label, `[runtime] 解压到 ${dir} …`)
-    taskProgress(label, 0.42, '解压 Node')
+    taskLine(label, t(`[runtime] 解压到 ${dir} …`, `[runtime] Extracting to ${dir} …`))
+    taskProgress(label, 0.42, t('解压 Node', 'Extracting Node'))
     mkdirSync(stage, { recursive: true })
     // Windows ships bsdtar, which extracts zip archives.
     const x = await runAsync('tar', ['-xf', zip, '-C', stage], root, label, process.platform === 'win32')
     if (!x.ok || !existsSync(inner)) {
-      taskLine(label, 'tar 解压失败,改用 PowerShell Expand-Archive…', 'stderr')
+      taskLine(label, t('tar 解压失败,改用 PowerShell Expand-Archive…', 'tar extraction failed, falling back to PowerShell Expand-Archive…'), 'stderr')
       const ps = await runAsync(
         'powershell',
         ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath '${zip}' -DestinationPath '${stage}'`],
@@ -244,14 +245,14 @@ export async function installRuntime(): Promise<CmdResult> {
       )
       if (!ps.ok || !existsSync(inner)) {
         taskDone(label, 1)
-        return { ok: false, code: 1, error: 'Node 解压失败(请检查磁盘空间 / 网络)' }
+        return { ok: false, code: 1, error: t('Node 解压失败(请检查磁盘空间 / 网络)', 'Failed to extract Node (check disk space / network)') }
       }
     }
     if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
     renameSync(inner, dir)
     rmSync(stage, { recursive: true, force: true })
     rmSync(zip, { force: true })
-    taskLine(label, `[runtime] ✔ Node 就绪: ${nodeExe()}`)
+    taskLine(label, t(`[runtime] ✔ Node 就绪: ${nodeExe()}`, `[runtime] ✔ Node ready: ${nodeExe()}`))
   }
 
   // 2. bundled dsh (full built-in plugin closure lives in its node_modules)
@@ -261,8 +262,8 @@ export async function installRuntime(): Promise<CmdResult> {
   if (!existsSync(pkg)) {
     writeFileSync(pkg, JSON.stringify({ name: 'dsh-runtime', private: true, version: '0.0.0' }, null, 2) + '\n', 'utf8')
   }
-  taskLine(label, `[runtime] 安装 @deepseek-ai/dsh@${dshVer}(含全部内置插件)…`)
-  taskProgress(label, 0.45, `安装 @deepseek-ai/dsh@${dshVer}(体积较大,请稍候)`)
+  taskLine(label, t(`[runtime] 安装 @deepseek-ai/dsh@${dshVer}(含全部内置插件)…`, `[runtime] Installing @deepseek-ai/dsh@${dshVer} (with all built-in plugins)…`))
+  taskProgress(label, 0.45, t(`安装 @deepseek-ai/dsh@${dshVer}(体积较大,请稍候)`, `Installing @deepseek-ai/dsh@${dshVer} (large download, please wait)`))
   const npm = join(dir, 'npm.cmd')
   const ins = await runAsync(npm, ['install', `@deepseek-ai/dsh@${dshVer}`, ...npmOpts], dshDir, label, process.platform === 'win32')
   if (!ins.ok) {
@@ -271,13 +272,13 @@ export async function installRuntime(): Promise<CmdResult> {
   }
   if (!existsSync(dshBin())) {
     taskDone(label, 1)
-    return { ok: false, code: 1, error: '安装后未找到 dsh 入口(lib/bin.js)' }
+    return { ok: false, code: 1, error: t('安装后未找到 dsh 入口(lib/bin.js)', 'dsh entry not found after install (lib/bin.js)') }
   }
 
   // 3. pnpm for `dsh plugin`
-  taskProgress(label, 0.86, '安装 pnpm')
+  taskProgress(label, 0.86, t('安装 pnpm', 'Installing pnpm'))
   if (!existsSync(join(dir, 'pnpm.cmd'))) {
-    taskLine(label, '[runtime] 安装 pnpm(供 dsh plugin 使用)…')
+    taskLine(label, t('[runtime] 安装 pnpm(供 dsh plugin 使用)…', '[runtime] Installing pnpm (for dsh plugin)…'))
     const pnpm = await runAsync(npm, ['install', '-g', 'pnpm', ...npmOpts], dir, label, process.platform === 'win32')
     if (!pnpm.ok) {
       taskDone(label, pnpm.code ?? 1)
@@ -286,7 +287,7 @@ export async function installRuntime(): Promise<CmdResult> {
   }
 
   // 4. auto-configure paths so the launcher switches to bundled mode.
-  taskProgress(label, 0.96, '写入配置')
+  taskProgress(label, 0.96, t('写入配置', 'Writing config'))
   const next = setConfig({
     installMode: 'bundled',
     runtimeRoot: root,
@@ -297,9 +298,9 @@ export async function installRuntime(): Promise<CmdResult> {
     profile: cfg.profile || 'web',
     pnpm: join(dir, 'pnpm.cmd')
   })
-  taskProgress(label, 1, '部署完成')
-  taskLine(label, '[runtime] ✔ 完成 — 已切换为 bundled 模式')
-  taskLine(label, `[runtime] 启动命令: ${next.nodePath} ${[...next.launchArgs, next.profile].join(' ')}`)
+  taskProgress(label, 1, t('部署完成', 'Deployment complete'))
+  taskLine(label, t('[runtime] ✔ 完成 — 已切换为 bundled 模式', '[runtime] ✔ Done — switched to bundled mode'))
+  taskLine(label, t(`[runtime] 启动命令: ${next.nodePath} ${[...next.launchArgs, next.profile].join(' ')}`, `[runtime] Launch command: ${next.nodePath} ${[...next.launchArgs, next.profile].join(' ')}`))
   taskDone(label, 0)
   return { ok: true, code: 0 }
 }
@@ -313,16 +314,16 @@ export async function updateRuntime(): Promise<CmdResult> {
   const cfg = getConfig()
   const label = 'runtime:update'
   if (!existsSync(nodeExe())) {
-    taskLine(label, '[runtime] 尚未安装运行环境,请先「一键安装运行环境」。', 'stderr')
+    taskLine(label, t('[runtime] 尚未安装运行环境,请先「一键安装运行环境」。', '[runtime] Runtime not installed yet — click "Install runtime" first.'), 'stderr')
     taskDone(label, 1)
-    return { ok: false, code: 1, error: '运行环境未安装' }
+    return { ok: false, code: 1, error: t('运行环境未安装', 'Runtime not installed') }
   }
   const dshVer = cfg.dshVersion || '0.1.0-rc.6'
   const npm = join(nodeDir(), 'npm.cmd')
-  taskLine(label, `[runtime] 升级 @deepseek-ai/dsh@${dshVer}(不触碰 ~/.dsh 的第三方插件)…`)
+  taskLine(label, t(`[runtime] 升级 @deepseek-ai/dsh@${dshVer}(不触碰 ~/.dsh 的第三方插件)…`, `[runtime] Upgrading @deepseek-ai/dsh@${dshVer} (third-party plugins in ~/.dsh are untouched)…`))
   const r = await runAsync(npm, ['install', `@deepseek-ai/dsh@${dshVer}`, '--no-fund', '--no-audit'], dshInstallDir(), label, process.platform === 'win32')
   if (!r.ok) return r
-  taskLine(label, '[runtime] ✔ 内置 dsh 已升级')
+  taskLine(label, t('[runtime] ✔ 内置 dsh 已升级', '[runtime] ✔ Built-in dsh upgraded'))
   taskDone(label, 0)
   return { ok: true, code: 0 }
 }

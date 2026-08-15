@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { HarnessProvider, useHarness } from './hooks/useHarness'
+import { I18nProvider, useI18n } from './i18n'
 import { api } from './lib/api'
 import { Sidebar, type PageId } from './components/Sidebar'
 import { TopBar } from './components/TopBar'
@@ -8,17 +9,17 @@ import { Dashboard } from './pages/Dashboard'
 import { Plugins } from './pages/Plugins'
 import { Settings } from './pages/Settings'
 
-const TITLES: Record<PageId, string> = {
-  dashboard: '控制台',
-  plugins: '第三方插件管理',
-  settings: '设置'
-}
-
 const SIDEBAR_EXPANDED = 212
 const SIDEBAR_COLLAPSED = 56
 
 function Shell(): JSX.Element {
   const { state } = useHarness()
+  const { t } = useI18n()
+  const TITLES: Record<PageId, string> = {
+    dashboard: t('nav.dashboard'),
+    plugins: t('nav.plugins'),
+    settings: t('nav.settings')
+  }
   const [view, setView] = useState<PageId | 'dsh'>('dashboard')
   const [collapsed, setCollapsed] = useState(false)
 
@@ -88,7 +89,9 @@ function Shell(): JSX.Element {
 export default function App(): JSX.Element {
   return (
     <HarnessProvider>
-      <Shell />
+      <I18nProvider>
+        <Shell />
+      </I18nProvider>
     </HarnessProvider>
   )
 }

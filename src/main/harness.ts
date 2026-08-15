@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { getActiveApiPreset, getConfig } from './config'
+import { t } from './i18n'
 import { bundledEnv, resolveBundledDshBin, resolveBundledNode } from './runtime'
 import { broadcast } from './bus'
 import type { HarnessState, LauncherConfig, LogLine } from '../shared/types'
@@ -71,7 +72,7 @@ function launchPlan(cfg: LauncherConfig): LaunchPlan {
   if (cfg.installMode === 'bundled') {
     const node = resolveBundledNode()
     const bin = resolveBundledDshBin()
-    if (!node || !bin) throw new Error('内置运行环境未安装 — 请到「设置 → 运行环境」点击「一键安装运行环境」。')
+    if (!node || !bin) throw new Error(t('内置运行环境未安装 — 请到「设置 → 运行环境」点击「一键安装运行环境」。', 'Built-in runtime not installed — go to Settings → Runtime and click "Install runtime".'))
     return {
       cmd: node,
       args: [...cfg.launchArgs, cfg.profile],
@@ -88,7 +89,7 @@ function launchPlan(cfg: LauncherConfig): LaunchPlan {
 }
 
 export async function start(): Promise<{ ok: boolean; error?: string }> {
-  if (child) return { ok: false, error: 'harness 已在运行' }
+  if (child) return { ok: false, error: t('harness 已在运行', 'harness is already running') }
   const cfg = getConfig()
   let plan: LaunchPlan
   try {
@@ -97,7 +98,7 @@ export async function start(): Promise<{ ok: boolean; error?: string }> {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
   if (cfg.installMode === 'source' && (!plan.cwd || !existsSync(plan.cwd))) {
-    return { ok: false, error: `harness 仓库不存在: ${plan.cwd}` }
+    return { ok: false, error: t(`harness 仓库不存在: ${plan.cwd}`, `harness repo not found: ${plan.cwd}`) }
   }
 
   // Refuse to race an existing listener (e.g. a dsh instance started outside the launcher).
@@ -105,7 +106,10 @@ export async function start(): Promise<{ ok: boolean; error?: string }> {
     const pid = await findListeningPid(cfg.port)
     return {
       ok: false,
-      error: `端口 ${cfg.port} 已被占用 (pid=${pid ?? '?'}) — 可能有另一个 dsh 实例正在运行,请先停止它再启动。`
+      error: t(
+        `端口 ${cfg.port} 已被占用 (pid=${pid ?? '?'}) — 可能有另一个 dsh 实例正在运行,请先停止它再启动。`,
+        `Port ${cfg.port} is already in use (pid=${pid ?? '?'}) — another dsh instance may be running; stop it first.`
+      )
     }
   }
 
@@ -119,7 +123,7 @@ export async function start(): Promise<{ ok: boolean; error?: string }> {
     exitCode: null,
     lastError: null
   })
-  pushLine('stderr', `[launcher] 启动 dsh profile "${cfg.profile}" (${cfg.installMode === 'bundled' ? '内置运行环境' : '源码版'})`)
+  pushLine('stderr', t(`[launcher] 启动 dsh profile "${cfg.profile}" (${cfg.installMode === 'bundled' ? '内置运行环境' : '源码版'})`, `[launcher] Starting dsh profile "${cfg.profile}" (${cfg.installMode === 'bundled' ? 'bundled runtime' : 'source build'})`))
   pushLine('stderr', `[launcher] ${plan.cmd} ${plan.args.join(' ')}`)
 
   // Inject the active API vendor's endpoint AND key. harness reads
@@ -132,12 +136,12 @@ export async function start(): Promise<{ ok: boolean; error?: string }> {
   if (preset.baseUrl) apiEnv.DEEPSEEK_BASE_URL = preset.baseUrl
   if (preset.apiKey?.trim()) apiEnv.DEEPSEEK_API_KEY = preset.apiKey.trim()
   if (apiEnv.DEEPSEEK_BASE_URL) {
-    pushLine('stderr', `[launcher] API 厂商: ${preset.name} (${preset.baseUrl})`)
+    pushLine('stderr', t(`[launcher] API 厂商: ${preset.name} (${preset.baseUrl})`, `[launcher] API provider: ${preset.name} (${preset.baseUrl})`))
   }
   if (apiEnv.DEEPSEEK_API_KEY) {
-    pushLine('stderr', `[launcher] 已注入该厂商的 API Key(${preset.name}) — 模型调用不再需要去 DSH 界面填 key`)
+    pushLine('stderr', t(`[launcher] 已注入该厂商的 API Key(${preset.name}) — 模型调用不再需要去 DSH 界面填 key`, `[launcher] Injected the provider's API key (${preset.name}) — no need to fill it in the DSH UI`))
   } else if (apiEnv.DEEPSEEK_BASE_URL) {
-    pushLine('stderr', '[launcher] 该预设未填 API Key — 将使用 ~/.dsh/.credentials.yaml 中已存的 key,若无则模型调用会报 MISSING_CREDENTIAL')
+    pushLine('stderr', t('[launcher] 该预设未填 API Key — 将使用 ~/.dsh/.credentials.yaml 中已存的 key,若无则模型调用会报 MISSING_CREDENTIAL', '[launcher] This preset has no API Key — falling back to ~/.dsh/.credentials.yaml; without it model calls fail with MISSING_CREDENTIAL'))
   }
 
   let proc: ChildProcess
@@ -151,7 +155,7 @@ export async function start(): Promise<{ ok: boolean; error?: string }> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     patch({ status: 'error', lastError: message })
-    pushLine('stderr', `[launcher] 启动失败: ${message}`)
+    pushLine('stderr', t(`[launcher] 启动失败: ${message}`, `[launcher] Failed to start: ${message}`))
     return { ok: false, error: message }
   }
 
@@ -162,18 +166,18 @@ export async function start(): Promise<{ ok: boolean; error?: string }> {
   proc.stdout?.on('data', chunkToLines('stdout'))
   proc.stderr?.on('data', chunkToLines('stderr'))
   proc.on('error', (err) => {
-    pushLine('stderr', `[launcher] 进程错误: ${err.message}`)
+    pushLine('stderr', t(`[launcher] 进程错误: ${err.message}`, `[launcher] Process error: ${err.message}`))
     patch({ status: 'error', lastError: err.message })
   })
   proc.on('exit', (code, signal) => {
-    pushLine('stderr', `[launcher] 进程退出 code=${code ?? 'null'} signal=${signal ?? 'none'}`)
+    pushLine('stderr', t(`[launcher] 进程退出 code=${code ?? 'null'} signal=${signal ?? 'none'}`, `[launcher] Process exited code=${code ?? 'null'} signal=${signal ?? 'none'}`))
     child = null
     stopPortProbe()
     clearStartTimer()
     if (!stopping) {
       // Exited on its own.
       if (state.status === 'running' || state.status === 'starting') {
-        patch({ status: 'error', pid: null, ready: false, exitCode: code, lastError: code === 0 ? null : '进程意外退出' })
+        patch({ status: 'error', pid: null, ready: false, exitCode: code, lastError: code === 0 ? null : t('进程意外退出', 'Process exited unexpectedly') })
       } else {
         patch({ status: 'stopped', pid: null, ready: false, exitCode: code })
       }
@@ -186,8 +190,8 @@ export async function start(): Promise<{ ok: boolean; error?: string }> {
   startPortProbe()
   startTimer = setTimeout(() => {
     if (state.status === 'starting') {
-      pushLine('stderr', `[launcher] 启动超时(${cfg.startupTimeoutMs / 1000}s),端口 ${cfg.port} 未就绪`)
-      patch({ status: 'error', lastError: '启动超时 — 端口未就绪,请检查日志' })
+      pushLine('stderr', t(`[launcher] 启动超时(${cfg.startupTimeoutMs / 1000}s),端口 ${cfg.port} 未就绪`, `[launcher] Startup timeout (${cfg.startupTimeoutMs / 1000}s), port ${cfg.port} not ready`))
+      patch({ status: 'error', lastError: t('启动超时 — 端口未就绪,请检查日志', 'Startup timeout — port not ready, check the logs') })
     }
   }, cfg.startupTimeoutMs)
   return { ok: true }
@@ -210,7 +214,7 @@ function startPortProbe(): void {
     const port = getConfig().port
     probePort(port, (ok) => {
       if (ok && state.status === 'starting') {
-        pushLine('stdout', `[launcher] ✔ 就绪 — Web UI: http://127.0.0.1:${port}`)
+        pushLine('stdout', t(`[launcher] ✔ 就绪 — Web UI: http://127.0.0.1:${port}`, `[launcher] ✔ Ready — Web UI: http://127.0.0.1:${port}`))
         patch({ status: 'running', ready: true })
         stopPortProbe()
         clearStartTimer()
@@ -280,7 +284,7 @@ async function tickMonitor(): Promise<void> {
     if (inUse) {
       if (state.status !== 'external' && state.status !== 'stopping') {
         const pid = await findListeningPid(port)
-        pushLine('stderr', `[launcher] 检测到外部 DSH 实例 (pid=${pid ?? '?'}),端口 ${port} 已被占用`)
+        pushLine('stderr', t(`[launcher] 检测到外部 DSH 实例 (pid=${pid ?? '?'}),端口 ${port} 已被占用`, `[launcher] Detected an external DSH instance (pid=${pid ?? '?'}), port ${port} is in use`))
         patch({ status: 'external', pid, ready: true, startedAt: null, exitCode: null, lastError: null })
       }
     } else if (state.status === 'external' || state.status === 'stopping') {
@@ -290,8 +294,8 @@ async function tickMonitor(): Promise<void> {
   } else if (state.status === 'running') {
     const inUse = await portInUse(port)
     if (!inUse) {
-      pushLine('stderr', `[launcher] 端口 ${port} 连接中断,进程可能已异常`)
-      patch({ status: 'error', ready: false, lastError: '端口连接中断,进程可能已异常' })
+      pushLine('stderr', t(`[launcher] 端口 ${port} 连接中断,进程可能已异常`, `[launcher] Connection to port ${port} lost — the process may have crashed`))
+      patch({ status: 'error', ready: false, lastError: t('端口连接中断,进程可能已异常', 'Connection to the port was lost — the process may have crashed') })
     }
   }
 }
@@ -321,7 +325,7 @@ export function stop(): Promise<void> {
       if (state.status === 'external' && state.pid) {
         // Kill the externally-started instance so the launcher can take over.
         const pid = state.pid
-        pushLine('stderr', `[launcher] 停止外部实例 (pid=${pid})`)
+        pushLine('stderr', t(`[launcher] 停止外部实例 (pid=${pid})`, `[launcher] Stopping external instance (pid=${pid})`))
         patch({ status: 'stopping', pid: null, ready: false })
         if (process.platform === 'win32') {
           const kill = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true, stdio: 'ignore' })
@@ -357,7 +361,7 @@ export function stop(): Promise<void> {
     patch({ status: 'stopping' })
     stopPortProbe()
     clearStartTimer()
-    pushLine('stderr', `[launcher] 停止进程 (pid=${proc.pid ?? '?'})`)
+    pushLine('stderr', t(`[launcher] 停止进程 (pid=${proc.pid ?? '?'})`, `[launcher] Stopping process (pid=${proc.pid ?? '?'})`))
 
     let resolved = false
     const finish = (): void => {

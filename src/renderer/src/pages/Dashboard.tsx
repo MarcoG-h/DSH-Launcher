@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import { useHarness, statusLabel } from '../hooks/useHarness'
+import { useHarness } from '../hooks/useHarness'
+import { useI18n } from '../i18n'
 import { PlayIcon, StopIcon, RefreshIcon, ExternalIcon, PowerIcon } from '../lib/icons'
 import { LogConsole } from '../components/LogConsole'
 import { StatusPill } from '../components/StatusPill'
@@ -31,6 +32,7 @@ function Meta({ label, value, mono = true }: { label: string; value: string; mon
 
 export function Dashboard(): JSX.Element {
   const { state, log, start, stop, restart, openUi, actionError, dismissError } = useHarness()
+  const { t, statusLabel } = useI18n()
   const [busy, setBusy] = useState<'start' | 'stop' | 'restart' | null>(null)
   const [now, setNow] = useState(Date.now())
 
@@ -77,12 +79,12 @@ export function Dashboard(): JSX.Element {
             </p>
             {state?.lastError && (
               <p className="text-[12.5px]" style={{ color: 'var(--err)' }}>
-                上次错误: {state.lastError}
+                {t('dashboard.lastError')} {state.lastError}
               </p>
             )}
             {status === 'external' && (
               <p className="text-[12.5px]" style={{ color: 'var(--warn)' }}>
-                检测到外部实例在运行 — 点「停止」将其终止后,即可由本应用接管启动。
+                {t('dashboard.externalNotice')}
               </p>
             )}
           </div>
@@ -90,15 +92,15 @@ export function Dashboard(): JSX.Element {
           <div className="flex items-center gap-2">
             {!running ? (
               <button className="btn btn-primary" disabled={busy !== null} onClick={() => void doStart()}>
-                <PlayIcon /> {busy === 'start' ? '启动中…' : '启动'}
+                <PlayIcon /> {busy === 'start' ? t('dashboard.starting') : t('dashboard.start')}
               </button>
             ) : (
               <button className="btn btn-danger" disabled={busy !== null} onClick={() => void doStop()}>
-                <StopIcon /> {busy === 'stop' ? '停止中…' : status === 'external' ? '停止(外部)' : '停止'}
+                <StopIcon /> {busy === 'stop' ? t('dashboard.stopping') : status === 'external' ? t('dashboard.stopExternal') : t('dashboard.stop')}
               </button>
             )}
             <button className="btn btn-ghost" disabled={busy !== null || !canRestart} onClick={() => void doRestart()}>
-              <RefreshIcon /> {busy === 'restart' ? '重启中…' : '重启'}
+              <RefreshIcon /> {busy === 'restart' ? t('dashboard.restarting') : t('dashboard.restart')}
             </button>
             <button
               className="btn btn-ghost"
@@ -106,7 +108,7 @@ export function Dashboard(): JSX.Element {
               onClick={() => void openUi()}
               title="http://127.0.0.1:{port}"
             >
-              <ExternalIcon /> 打开 Web UI
+              <ExternalIcon /> {t('dashboard.openUi')}
             </button>
           </div>
         </div>
@@ -129,12 +131,12 @@ export function Dashboard(): JSX.Element {
 
         {/* Meta grid */}
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 mt-5 pt-4 border-t" style={{ borderColor: 'var(--border)' }}>
-          <Meta label="进程 PID" value={state?.pid ? String(state.pid) : '—'} />
-          <Meta label="端口" value={String(state?.port ?? 3080)} />
-          <Meta label="运行时长" value={startedAt ? fmtUptime(Math.max(0, now - startedAt)) : '—'} />
-          <Meta label="就绪" value={state?.ready ? '✔ 是' : '—'} />
-          <Meta label="退出码" value={state && state.exitCode != null ? String(state.exitCode) : '—'} />
-          <Meta label="数据目录" value={state?.profile ?? '—'} mono={false} />
+          <Meta label={t('meta.pid')} value={state?.pid ? String(state.pid) : '—'} />
+          <Meta label={t('meta.port')} value={String(state?.port ?? 3080)} />
+          <Meta label={t('meta.uptime')} value={startedAt ? fmtUptime(Math.max(0, now - startedAt)) : '—'} />
+          <Meta label={t('meta.ready')} value={state?.ready ? t('meta.readyYes') : '—'} />
+          <Meta label={t('meta.exitCode')} value={state && state.exitCode != null ? String(state.exitCode) : '—'} />
+          <Meta label={t('meta.dataDir')} value={state?.profile ?? '—'} mono={false} />
         </div>
       </div>
 
@@ -146,7 +148,7 @@ export function Dashboard(): JSX.Element {
 
       <div className="flex items-center gap-2 text-[12px]" style={{ color: 'var(--muted)' }}>
         <PowerIcon />
-        启动与停止均会控制 dsh 进程树;窗口关闭时按设置决定是否随应用退出。
+        {t('dashboard.footer')}
       </div>
     </div>
   )

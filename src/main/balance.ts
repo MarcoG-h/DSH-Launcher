@@ -7,6 +7,7 @@ import { net } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getActiveApiPreset, getConfig } from './config'
+import { t } from './i18n'
 import type { BalanceResult } from '../shared/types'
 
 /** Extract `DEEPSEEK_API_KEY: <value>` from the simple key: value credential file. */
@@ -30,7 +31,7 @@ export async function getBalance(): Promise<BalanceResult> {
     return {
       ok: false,
       provider: preset.name,
-      error: '该厂商未配置余额接口 — 可在 设置 → API 切换 里填写 balanceUrl。'
+      error: t('该厂商未配置余额接口 — 可在 设置 → API 切换 里填写 balanceUrl。', 'This provider has no balance URL configured — set one under Settings → API switch.')
     }
   }
   // Key priority: preset key → global override → dsh credentials file.
@@ -39,13 +40,13 @@ export async function getBalance(): Promise<BalanceResult> {
     return {
       ok: false,
       provider: preset.name,
-      error: '未找到 API Key — 请在该预设或设置中填写,或确认 ~/.dsh/.credentials.yaml 已配置。'
+      error: t('未找到 API Key — 请在该预设或设置中填写,或确认 ~/.dsh/.credentials.yaml 已配置。', 'No API Key found — set it in this preset or in Settings, or check ~/.dsh/.credentials.yaml.')
     }
   }
   try {
     const res = await net.fetch(url, { headers: { Authorization: `Bearer ${key}` } })
     if (!res.ok) {
-      return { ok: false, provider: preset.name, error: `余额接口返回 HTTP ${res.status}` }
+      return { ok: false, provider: preset.name, error: t(`余额接口返回 HTTP ${res.status}`, `Balance endpoint returned HTTP ${res.status}`) }
     }
     const json = (await res.json()) as {
       is_available?: boolean
@@ -58,7 +59,7 @@ export async function getBalance(): Promise<BalanceResult> {
     }
     const info = json.balance_infos?.[0]
     if (!info) {
-      return { ok: false, provider: preset.name, error: '余额响应缺少 balance_infos' }
+      return { ok: false, provider: preset.name, error: t('余额响应缺少 balance_infos', 'Balance response is missing balance_infos') }
     }
     return {
       ok: true,

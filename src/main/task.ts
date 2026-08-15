@@ -3,6 +3,7 @@
 
 import { spawn } from 'node:child_process'
 import { broadcast } from './bus'
+import { t } from './i18n'
 import type { CmdResult } from '../shared/types'
 
 const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g
@@ -23,10 +24,10 @@ export function taskDone(label: string, code: number): void {
 }
 
 function formatElapsed(s: number): string {
-  if (s < 60) return `${s} 秒`
+  if (s < 60) return t(`${s} 秒`, `${s} sec`)
   const m = Math.floor(s / 60)
   const r = s % 60
-  return r > 0 ? `${m} 分 ${r} 秒` : `${m} 分`
+  return r > 0 ? t(`${m} 分 ${r} 秒`, `${m} min ${r} sec`) : t(`${m} 分`, `${m} min`)
 }
 
 /** Stream a child process and broadcast its output as a task. */
@@ -59,7 +60,7 @@ export function runAsync(cmd: string, args: string[], cwd: string, label: string
     const watchdog = setInterval(() => {
       if (Date.now() - lastOutput < 30_000) return
       lastOutput = Date.now()
-      taskLine(label, `[task] 仍在执行中,已运行 ${formatElapsed(Math.round((Date.now() - started) / 1000))} — 暂无新输出,请耐心等待…`)
+      taskLine(label, t(`[task] 仍在执行中,已运行 ${formatElapsed(Math.round((Date.now() - started) / 1000))} — 暂无新输出,请耐心等待…`, `[task] Still running (${formatElapsed(Math.round((Date.now() - started) / 1000))}) — no new output yet, please wait…`))
     }, 10_000)
     const stopWatchdog = (): void => clearInterval(watchdog)
     const touch = (): void => {

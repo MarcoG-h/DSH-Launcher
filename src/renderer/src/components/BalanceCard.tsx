@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { api, type BalanceData } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
+import { useI18n } from '../i18n'
 import { RefreshIcon } from '../lib/icons'
 
 /** Balance widget — manual + 5-minute auto refresh, follows the active API preset. */
 export function BalanceCard(): JSX.Element {
   const { config, saveConfig } = useHarness()
+  const { t } = useI18n()
   const [data, setData] = useState<BalanceData | null>(null)
   const [provider, setProvider] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -23,7 +25,7 @@ export function BalanceCard(): JSX.Element {
       setData(r.data)
       setError(null)
     } else {
-      setError(r.error ?? '获取余额失败')
+      setError(r.error ?? t('balance.fetchFailed'))
       setData(null)
     }
     setLoading(false)
@@ -47,7 +49,7 @@ export function BalanceCard(): JSX.Element {
     <div className="panel p-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
-          <h3 className="section-title">{provider ?? 'API'} 余额</h3>
+          <h3 className="section-title">{provider ?? 'API'} {t('balance.title')}</h3>
           {data && (
             <span
               className="badge"
@@ -57,7 +59,7 @@ export function BalanceCard(): JSX.Element {
               }}
             >
               <span className="badge-dot" style={{ background: availableColor }} />
-              {data.is_available ? '可用' : '不可用'}
+              {data.is_available ? t('balance.available') : t('balance.unavailable')}
             </span>
           )}
         </div>
@@ -67,7 +69,7 @@ export function BalanceCard(): JSX.Element {
               className="input"
               value={activeId ?? ''}
               onChange={(e) => void switchPreset(e.target.value)}
-              title="切换 API 厂商(重启 dsh 后注入新地址)"
+              title={t('balance.switchTitle')}
             >
               {presets.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -76,8 +78,8 @@ export function BalanceCard(): JSX.Element {
               ))}
             </select>
           )}
-          <button className="btn btn-ghost btn-sm shrink-0" onClick={() => void load()} title="刷新余额">
-            <RefreshIcon /> {loading ? '刷新中…' : '刷新'}
+          <button className="btn btn-ghost btn-sm shrink-0" onClick={() => void load()} title={t('balance.refreshTitle')}>
+            <RefreshIcon /> {loading ? t('balance.refreshing') : t('balance.refresh')}
           </button>
         </div>
       </div>
@@ -90,7 +92,7 @@ export function BalanceCard(): JSX.Element {
         <div className="mt-3 grid grid-cols-3 gap-4">
           <div>
             <div className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>
-              总额
+              {t('balance.total')}
             </div>
             <div className="mono text-[20px] font-semibold mt-0.5" style={{ color: 'var(--text)' }}>
               {data.total_balance}{' '}
@@ -101,7 +103,7 @@ export function BalanceCard(): JSX.Element {
           </div>
           <div>
             <div className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>
-              赠送
+              {t('balance.granted')}
             </div>
             <div className="mono text-[16px] font-semibold mt-0.5" style={{ color: 'var(--text)' }}>
               {data.granted_balance}
@@ -109,7 +111,7 @@ export function BalanceCard(): JSX.Element {
           </div>
           <div>
             <div className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--muted)' }}>
-              充值
+              {t('balance.toppedUp')}
             </div>
             <div className="mono text-[16px] font-semibold mt-0.5" style={{ color: 'var(--text)' }}>
               {data.topped_up_balance}
@@ -118,7 +120,7 @@ export function BalanceCard(): JSX.Element {
         </div>
       ) : (
         <p className="mt-2.5 text-[12.5px]" style={{ color: 'var(--muted)' }}>
-          {loading ? '加载中…' : '—'}
+          {loading ? t('balance.loading') : '—'}
         </p>
       )}
     </div>

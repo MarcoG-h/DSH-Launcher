@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LogLine } from '../lib/api'
+import { useI18n } from '../i18n'
 
 const ERROR_RE = /error|failed|exception|ELIFECYCLE|Cannot find|ERR_MODULE|at \w+ \(/i
 const LAUNCHER_RE = /^\[launcher\]/
@@ -12,6 +13,7 @@ function lineColor(l: LogLine): string {
 }
 
 export function LogConsole({ lines, height = '520px' }: { lines: LogLine[]; height?: string }): React.JSX.Element {
+  const { t } = useI18n()
   const ref = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
   const [stick, setStick] = useState(true)
@@ -40,11 +42,11 @@ export function LogConsole({ lines, height = '520px' }: { lines: LogLine[]; heig
           <span className="w-3 h-3 rounded-full" style={{ background: '#28c840' }} />
         </div>
         <span className="text-[12px] font-medium" style={{ color: 'var(--muted)' }}>
-          启动日志 · 实时输出
+          {t('log.title')}
         </span>
         <div className="ml-auto flex items-center gap-2">
           <button className="btn btn-ghost btn-sm" onClick={() => { setClearedAt(Date.now()) }}>
-            清空
+            {t('log.clear')}
           </button>
           <button
             className={`btn btn-sm ${stick ? 'btn-primary' : 'btn-ghost'}`}
@@ -54,7 +56,7 @@ export function LogConsole({ lines, height = '520px' }: { lines: LogLine[]; heig
               if (ref.current) ref.current.scrollTop = ref.current.scrollHeight
             }}
           >
-            {stick ? '自动滚动 ✓' : '自动滚动'}
+            {stick ? t('log.autoScrollOn') : t('log.autoScroll')}
           </button>
         </div>
       </div>
@@ -66,7 +68,7 @@ export function LogConsole({ lines, height = '520px' }: { lines: LogLine[]; heig
       >
         {lines.length === 0 ? (
           <div className="mono text-[12.5px] leading-relaxed" style={{ color: '#5c6370' }}>
-            暂无日志 — 点击「启动」开始运行 dsh。
+            {t('log.empty')}
           </div>
         ) : (
           lines.map((l, i) => (
