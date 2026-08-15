@@ -7,7 +7,14 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()]
   },
   preload: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        // `electron` must stay external or the npm installer stub (which only
+        // exports the executable path) gets bundled and contextBridge breaks.
+        external: ['electron']
+      }
+    }
   },
   renderer: {
     plugins: [react(), tailwindcss()]

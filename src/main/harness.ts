@@ -1,10 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import { shell } from 'electron'
 import { existsSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import { getConfig } from './config'
+import { bundledEnv, resolveBundledDshBin, resolveBundledNode } from './runtime'
 import { broadcast } from './bus'
-import type { HarnessState, LogLine } from '../shared/types'
+import type { HarnessState, LauncherConfig, LogLine } from '../shared/types'
 
 const MAX_LOG = 6000
 // Strip ANSI colour/control sequences so the console stays clean.
@@ -13,6 +13,7 @@ const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g
 let child: ChildProcess | null = null
 let portTimer: NodeJS.Timeout | null = null
 let startTimer: NodeJS.Timeout | null = null
+let monitorTimer: NodeJS.Timeout | null = null
 let stopping = false
 
 let state: HarnessState = {
@@ -58,15 +59,54 @@ function chunkToLines(stream: 'stdout' | 'stderr'): (chunk: Buffer) => void {
   }
 }
 
+interface LaunchPlan {
+  cmd: string
+  args: string[]
+  cwd: string
+  envPatch?: NodeJS.ProcessEnv
+}
+
+/** Decide how to launch dsh based on the install mode. */
+function launchPlan(cfg: LauncherConfig): LaunchPlan {
+  if (cfg.installMode === 'bundled') {
+    const node = resolveBundledNode()
+    const bin = resolveBundledDshBin()
+    if (!node || !bin) throw new Error('内置运行环境未安装 — 请到「设置 → 运行环境」点击「一键安装运行环境」。')
+    return {
+      cmd: node,
+      args: [...cfg.launchArgs, cfg.profile],
+      cwd: cfg.runtimeRoot,
+      envPatch: bundledEnv()
+    }
+  }
+  return {
+    cmd: cfg.nodePath,
+    args: [...cfg.launchArgs, cfg.profile],
+    cwd: cfg.harnessRepo,
+    envPatch: undefined
+  }
+}
+
 export async function start(): Promise<{ ok: boolean; error?: string }> {
   if (child) return { ok: false, error: 'harness 已在运行' }
   const cfg = getConfig()
-  const cwd = cfg.harnessRepo
-  if (!cwd || !existsSync(cwd)) return { ok: false, error: `harness 仓库不存在: ${cwd}` }
+  let plan: LaunchPlan
+  try {
+    plan = launchPlan(cfg)
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+  if (cfg.installMode === 'source' && (!plan.cwd || !existsSync(plan.cwd))) {
+    return { ok: false, error: `harness 仓库不存在: ${plan.cwd}` }
+  }
 
   // Refuse to race an existing listener (e.g. a dsh instance started outside the launcher).
   if (await portInUse(cfg.port)) {
-    return { ok: false, error: `端口 ${cfg.port} 已被占用 — 可能有另一个 dsh 实例正在运行,请先停止它再启动。` }
+    const pid = await findListeningPid(cfg.port)
+    return {
+      ok: false,
+      error: `端口 ${cfg.port} 已被占用 (pid=${pid ?? '?'}) — 可能有另一个 dsh 实例正在运行,请先停止它再启动。`
+    }
   }
 
   patch({
@@ -79,14 +119,14 @@ export async function start(): Promise<{ ok: boolean; error?: string }> {
     exitCode: null,
     lastError: null
   })
-  pushLine('stderr', `[launcher] 启动 dsh profile "${cfg.profile}" @ ${cwd}`)
-  pushLine('stderr', `[launcher] ${cfg.nodePath} ${[...cfg.launchArgs, cfg.profile].join(' ')}`)
+  pushLine('stderr', `[launcher] 启动 dsh profile "${cfg.profile}" (${cfg.installMode === 'bundled' ? '内置运行环境' : '源码版'})`)
+  pushLine('stderr', `[launcher] ${plan.cmd} ${plan.args.join(' ')}`)
 
   let proc: ChildProcess
   try {
-    proc = spawn(cfg.nodePath, [...cfg.launchArgs, cfg.profile], {
-      cwd,
-      env: { ...process.env },
+    proc = spawn(plan.cmd, plan.args, {
+      cwd: plan.cwd,
+      env: { ...process.env, ...(plan.envPatch ?? {}) },
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     })
@@ -156,10 +196,6 @@ function startPortProbe(): void {
         patch({ status: 'running', ready: true })
         stopPortProbe()
         clearStartTimer()
-        if (getConfig().autoOpenUi) {
-          pushLine('stdout', `[launcher] 自动打开 Web UI…`)
-          void shell.openExternal(`http://127.0.0.1:${port}`)
-        }
       }
     })
   }, 500)
@@ -190,11 +226,100 @@ function probePort(port: number, cb: (ok: boolean) => void): void {
   sock.once('error', () => done(false))
 }
 
+/** Find the PID listening on a TCP port (Windows netstat). */
+function findListeningPid(port: number): Promise<number | null> {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      resolve(null)
+      return
+    }
+    let out = ''
+    const proc = spawn('netstat', ['-ano', '-p', 'tcp'], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+    proc.stdout?.on('data', (c: Buffer) => {
+      out += c.toString('utf8')
+    })
+    proc.on('error', () => resolve(null))
+    proc.on('close', () => {
+      const re = new RegExp(`(?:127\\.0\\.0\\.1|0\\.0\\.0\\.0|\\[::1\\]|\\[::\\]):${port}\\s+\\S+\\s+LISTENING\\s+(\\d+)`, 'i')
+      const m = out.match(re)
+      resolve(m ? Number(m[1]) : null)
+    })
+  })
+}
+
+/**
+ * Reconcile the launcher's state with reality on a timer.
+ * - No managed child: a port listener we didn't start ⇒ an external dsh instance
+ *   is running. Adopt it as state 'external' (with its PID); flip back to
+ *   'stopped' once the port frees.
+ * - Managed child in 'running': a dropped port means the server crashed/hung
+ *   even though the process is still alive.
+ */
+async function tickMonitor(): Promise<void> {
+  const port = getConfig().port
+  if (!child) {
+    const inUse = await portInUse(port)
+    if (inUse) {
+      if (state.status !== 'external' && state.status !== 'stopping') {
+        const pid = await findListeningPid(port)
+        pushLine('stderr', `[launcher] 检测到外部 DSH 实例 (pid=${pid ?? '?'}),端口 ${port} 已被占用`)
+        patch({ status: 'external', pid, ready: true, startedAt: null, exitCode: null, lastError: null })
+      }
+    } else if (state.status === 'external' || state.status === 'stopping') {
+      // External instance gone, or our external-kill finished.
+      patch({ status: 'stopped', pid: null, ready: false })
+    }
+  } else if (state.status === 'running') {
+    const inUse = await portInUse(port)
+    if (!inUse) {
+      pushLine('stderr', `[launcher] 端口 ${port} 连接中断,进程可能已异常`)
+      patch({ status: 'error', ready: false, lastError: '端口连接中断,进程可能已异常' })
+    }
+  }
+}
+
+function startMonitor(): void {
+  stopMonitor()
+  monitorTimer = setInterval(() => void tickMonitor(), 2500)
+  // Probe once shortly after boot so the initial state is correct.
+  setTimeout(() => void tickMonitor(), 800)
+}
+
+function stopMonitor(): void {
+  if (monitorTimer) {
+    clearInterval(monitorTimer)
+    monitorTimer = null
+  }
+}
+
+// Start the external-state monitor as soon as the module loads.
+startMonitor()
+
 export function stop(): Promise<void> {
   return new Promise((resolve) => {
     const proc = child
     if (!proc) {
       stopPortProbe()
+      if (state.status === 'external' && state.pid) {
+        // Kill the externally-started instance so the launcher can take over.
+        const pid = state.pid
+        pushLine('stderr', `[launcher] 停止外部实例 (pid=${pid})`)
+        patch({ status: 'stopping', pid: null, ready: false })
+        if (process.platform === 'win32') {
+          const kill = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true, stdio: 'ignore' })
+          kill.on('error', () => resolve())
+          kill.on('close', () => resolve())
+        } else {
+          // Best-effort: the monitor flips back to 'stopped' once the port frees.
+          try {
+            process.kill(pid, 'SIGTERM')
+          } catch {
+            /* ignore */
+          }
+          resolve()
+        }
+        return
+      }
       patch({ status: 'stopped', pid: null, ready: false })
       resolve()
       return

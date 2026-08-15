@@ -1,6 +1,6 @@
 // Shared types used by main, preload, and renderer.
 
-export type HarnessStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error'
+export type HarnessStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error' | 'external'
 
 export interface HarnessState {
   status: HarnessStatus
@@ -19,8 +19,20 @@ export interface LogLine {
   at: number
 }
 
+export type InstallMode = 'source' | 'bundled'
+
 export interface LauncherConfig {
+  /** 'source' runs the checked-out harness repo with a system Node; 'bundled' runs the portable runtime. */
+  installMode: InstallMode
+  /** Directory holding the portable Node runtime + bundled @deepseek-ai/dsh install. */
+  runtimeRoot: string
+  /** Portable Node version pinned by installRuntime (mirrored from npmmirror). */
+  nodeVersion: string
+  /** Bundled @deepseek-ai/dsh version pinned by installRuntime / updateRuntime. */
+  dshVersion: string
   harnessRepo: string
+  /** Remote URL used by the one-click download / update in Settings. */
+  harnessRepoUrl: string
   dshHome: string
   pluginDir: string
   profile: string
@@ -31,10 +43,10 @@ export interface LauncherConfig {
   buildCmd: string
   stopOnQuit: boolean
   pnpm: string
-  /** Open the Web UI in the default browser once the port reports ready. */
-  autoOpenUi: boolean
   /** Abort the boot with an error if the port has not become ready within this many ms. */
   startupTimeoutMs: number
+  /** Optional DeepSeek API key override for the balance widget; empty ⇒ read from dsh credentials. */
+  deepseekApiKey?: string
 }
 
 export interface InstalledPlugin {
@@ -92,6 +104,20 @@ export interface CmdResult {
   error?: string
 }
 
+export interface BalanceData {
+  currency: string
+  total_balance: string
+  granted_balance: string
+  topped_up_balance: string
+  is_available: boolean
+}
+
+export interface BalanceResult {
+  ok: boolean
+  data?: BalanceData
+  error?: string
+}
+
 export interface DshLauncherApi {
   getState(): Promise<BootstrapState>
   start(): Promise<CmdResult>
@@ -106,5 +132,19 @@ export interface DshLauncherApi {
   setPluginEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; changed: boolean; bundles: string[] }>
   repairDeps(): Promise<CmdResult>
   rebuild(): Promise<CmdResult>
+  /** Clone/update the harness repo, install deps, then auto-configure paths. */
+  downloadHarness(): Promise<CmdResult>
+  /** Clone a plugin from a GitHub repo URL into pluginDir, then install it. */
+  downloadPlugin(url: string): Promise<CmdResult>
+  /** Download + unpack the portable runtime (Node, bundled dsh, pnpm) and auto-configure paths. */
+  installRuntime(): Promise<CmdResult>
+  /** Upgrade only the bundled dsh package inside runtimeRoot; leaves ~/.dsh untouched. */
+  updateRuntime(): Promise<CmdResult>
+  /** DeepSeek balance for the configured API key. */
+  getBalance(): Promise<BalanceResult>
+  /** Show/hide the embedded DSH view; reload when the harness (re)became ready. */
+  setDshActive(active: boolean, reload?: boolean): void
+  /** Sync the sidebar width so the DSH view sits flush against it. */
+  setDshSidebarWidth(width: number): void
   onEvent(cb: (e: LauncherEvent) => void): () => void
 }

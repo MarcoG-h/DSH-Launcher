@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { JSX } from 'react'
 import { api, type PluginListResult } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
-import { TrashIcon, PlayIcon } from '../lib/icons'
+import { TrashIcon, PlayIcon, DownloadIcon } from '../lib/icons'
 import { TaskConsole } from '../components/TaskConsole'
+import { parseGitHubUrl } from '../../../shared/github'
 
 export function Plugins(): JSX.Element {
   const { config, tasks } = useHarness()
@@ -45,21 +46,29 @@ export function Plugins(): JSX.Element {
     }
   }
 
+  const gh = spec.trim() ? parseGitHubUrl(spec.trim()) : null
+
   const doInstall = (): void => {
     const target = spec.trim()
     if (!target) return
-    void run(`install:${target}`, () => api.installPlugin(target))
+    if (gh) {
+      // GitHub repo URL → download into pluginDir, then install from there.
+      void run(`clone:${gh.repo}`, () => api.downloadPlugin(target))
+    } else {
+      void run(`install:${target}`, () => api.installPlugin(target))
+    }
     setSpec('')
   }
 
-  const installTask = useMemo(() => {
-    if (!data) return undefined
-    for (const p of data.installed) {
-      const t = tasks[`install:${p.spec}`]
-      if (t && (t.running || t.lines.length > 0)) return t
-    }
-    return undefined
-  }, [tasks, data])
+  // Most recent clone / install tasks (covers both GitHub downloads and path/npm installs).
+  const recentTasks = useMemo(
+    () =>
+      Object.values(tasks)
+        .filter((t) => /^(clone|install):/.test(t.label))
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 3),
+    [tasks]
+  )
 
   const installed = data?.installed ?? []
   const local = data?.local ?? []
@@ -67,7 +76,7 @@ export function Plugins(): JSX.Element {
   return (
     <div className="p-5 space-y-5 max-w-[1000px]">
       <div className="flex items-center gap-2">
-        <h2 className="text-[18px] font-semibold">插件管理</h2>
+        <h2 className="text-[18px] font-semibold">第三方插件管理</h2>
         <span className="badge" style={{ color: 'var(--muted)', background: 'var(--bg-soft)' }}>
           profile: {config?.profile}
         </span>
@@ -75,11 +84,11 @@ export function Plugins(): JSX.Element {
 
       {/* Install */}
       <div className="panel p-4">
-        <label className="label">安装插件 — 本地路径 或 npm 包名</label>
+        <label className="label">安装插件 — GitHub 仓库地址 / 本地路径 / npm 包名</label>
         <div className="flex gap-2">
           <input
             className="input"
-            placeholder="如 C:/Users/Marco/DSH-Plugin/dsh-side-panel 或 @scope/plugin"
+            placeholder="https://github.com/owner/dsh-some-plugin"
             value={spec}
             onChange={(e) => setSpec(e.target.value)}
             onKeyDown={(e) => {
@@ -87,15 +96,24 @@ export function Plugins(): JSX.Element {
             }}
           />
           <button className="btn btn-primary shrink-0" disabled={!spec.trim() || busy !== null} onClick={doInstall}>
-            <PlayIcon /> 安装
+            {gh ? <DownloadIcon /> : <PlayIcon />} {gh ? '下载并安装' : '安装'}
           </button>
         </div>
-        {error && <p className="mt-2 text-[12px]" style={{ color: 'var(--err)' }}>{error}</p>}
-        {installTask && (
-          <div className="mt-3">
-            <TaskConsole task={installTask} />
-          </div>
+        {gh ? (
+          <p className="mt-2 text-[12px]" style={{ color: 'var(--accent)' }}>
+            将以 GitHub 方式克隆到 <span className="mono">{config?.pluginDir}/{gh.repo}</span> 并安装到 profile {config?.profile}。
+          </p>
+        ) : (
+          <p className="mt-2 text-[12px]" style={{ color: 'var(--muted)' }}>
+            支持 <span className="mono">https://github.com/owner/repo</span>、<span className="mono">github:owner/repo</span>、本地路径或 npm 包名。
+          </p>
         )}
+        {error && <p className="mt-2 text-[12px]" style={{ color: 'var(--err)' }}>{error}</p>}
+        {recentTasks.map((t) => (
+          <div className="mt-3" key={t.label}>
+            <TaskConsole task={t} />
+          </div>
+        ))}
       </div>
 
       {/* Installed */}

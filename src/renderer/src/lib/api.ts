@@ -1,4 +1,6 @@
 import type {
+  BalanceData,
+  BalanceResult,
   BootstrapState,
   CmdResult,
   HarnessState,
@@ -12,6 +14,8 @@ import type {
 } from '../../../shared/types'
 
 export type {
+  BalanceData,
+  BalanceResult,
   BootstrapState,
   CmdResult,
   HarnessState,

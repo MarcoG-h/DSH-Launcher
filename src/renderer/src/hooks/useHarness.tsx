@@ -17,6 +17,9 @@ interface HarnessContextValue {
   openUi: () => Promise<void>
   saveConfig: (patch: Partial<LauncherConfig>) => Promise<void>
   reloadPlugins: () => void
+  /** error from the last start/stop/restart action, surfaced in the UI */
+  actionError: string | null
+  dismissError: () => void
 }
 
 const HarnessContext = createContext<HarnessContextValue | null>(null)
@@ -26,7 +29,8 @@ const STATUS_TEXT: Record<string, string> = {
   starting: '启动中',
   running: '运行中',
   stopping: '停止中',
-  error: '异常'
+  error: '异常',
+  external: '外部运行中'
 }
 
 export function statusLabel(status: string | undefined): string {
@@ -45,6 +49,7 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
   const [config, setConfig] = useState<LauncherConfig | null>(null)
   const [tasks, setTasks] = useState<Record<string, TaskLog>>({})
   const [runningTasks, setRunningTasks] = useState<string[]>([])
+  const [actionError, setActionError] = useState<string | null>(null)
   const pluginsVersion = useRef(0)
 
   const reloadPlugins = useCallback(() => {
@@ -106,7 +111,10 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
 
   const start = useCallback(async () => {
     const r = await api.start()
-    if (!r.ok && r.error) console.error('start failed:', r.error)
+    if (!r.ok && r.error) {
+      console.error('start failed:', r.error)
+      setActionError(r.error)
+    }
   }, [])
 
   const stop = useCallback(async () => {
@@ -115,12 +123,17 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
 
   const restart = useCallback(async () => {
     const r = await api.restart()
-    if (!r.ok && r.error) console.error('restart failed:', r.error)
+    if (!r.ok && r.error) {
+      console.error('restart failed:', r.error)
+      setActionError(r.error)
+    }
   }, [])
 
   const openUi = useCallback(async () => {
     await api.openUi()
   }, [])
+
+  const dismissError = useCallback(() => setActionError(null), [])
 
   const saveConfig = useCallback(async (patch: Partial<LauncherConfig>) => {
     const next = await api.setConfig(patch)
@@ -141,7 +154,9 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
         restart,
         openUi,
         saveConfig,
-        reloadPlugins
+        reloadPlugins,
+        actionError,
+        dismissError
       }}
     >
       {children}

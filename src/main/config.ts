@@ -11,8 +11,17 @@ function firstExisting(candidates: string[]): string {
 }
 
 function defaults(): LauncherConfig {
+  const harnessRepo = firstExisting([process.env.DSH_REPO ?? '', join(home, 'deepseek-harness')])
+  const runtimeRoot = join(home, '.dsh-runtime')
   return {
-    harnessRepo: firstExisting([process.env.DSH_REPO ?? '', join(home, 'deepseek-harness')]),
+    // A checked-out repo implies we're on the developer machine ⇒ source mode.
+    // Anything else targets the portable runtime (sharing the launcher to others).
+    installMode: existsSync(harnessRepo) ? 'source' : 'bundled',
+    runtimeRoot,
+    nodeVersion: '22.14.0',
+    dshVersion: '0.1.0-rc.6',
+    harnessRepo,
+    harnessRepoUrl: 'https://github.com/deepseek-ai/deepseek-harness.git',
     dshHome: firstExisting([process.env.DSH_HOME ?? '', join(home, '.dsh')]),
     pluginDir: firstExisting([join(home, 'DSH-Plugin')]),
     profile: 'web',
@@ -22,7 +31,6 @@ function defaults(): LauncherConfig {
     buildCmd: 'pnpm run build',
     stopOnQuit: true,
     pnpm: 'pnpm',
-    autoOpenUi: true,
     startupTimeoutMs: 90000
   }
 }

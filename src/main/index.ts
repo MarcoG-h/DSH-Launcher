@@ -4,8 +4,10 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bindWindow } from './bus'
 import { getConfig } from './config'
+import { registerDshView } from './dshview'
 import { registerIpc } from './ipc'
 import { stopSync } from './harness'
+import { ensureShortcuts } from './shortcuts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -37,6 +39,7 @@ function createWindow(): BrowserWindow {
   })
 
   bindWindow(win)
+  registerDshView(win)
   win.on('ready-to-show', () => win.show())
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
@@ -53,6 +56,7 @@ function createWindow(): BrowserWindow {
 
 app.whenReady().then(() => {
   registerIpc()
+  ensureShortcuts()
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -11,9 +11,7 @@
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
     "build": "electron-vite build",
-    "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
-    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
-    "typecheck": "npm run typecheck:node && npm run typecheck:web"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "react": "^19.2.8",
