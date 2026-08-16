@@ -4,7 +4,7 @@
 
 DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的桌面启动器(Electron + React + Tailwind)。把 |安装运行环境|启动|重启||管理第三方插件|切换API| 这些常用操作收敛到一个本地客户端里。
 
-[English README](README.en.md)
+[English README](README.en.md)    |   [BiliBili教程视频](https://www.bilibili.com/video/BV1BMbR64EoQ/?vd_source=ed1422074bd9beff1e11e3fba3c0fff8)
 
 ## 界面截图
 
