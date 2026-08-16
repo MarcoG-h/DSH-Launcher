@@ -8,25 +8,23 @@ DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 
 ## 界面截图
 
-![控制台](screenshots/dashboard.png)
-
 ![新版本主界面](screenshots/main-ui-1.png)
 
 ![新版本主界面 2](screenshots/main-ui-2.png)
+
+## 功能特性
+
+- **一键式安装** —— 无需安装 Node.js、无需源码,一键部署便携 Node + dsh 运行环境,部署完即可直接使用，可离线部署。
+- **快捷API切换** —— 类似于cc-switch，对于想要使用其他非DeepSeek api的用户的选项，可以自定义接入任意厂商，随时切换。
+- **客户端界面** —— DSH Web直接嵌入应用内使用,无需跳转浏览器。
+- **快捷的启动与重启** —— 一键启动 / 停止 / 重启 dsh。
+- **第三方插件管理+便捷插件市场** —— 管理本地插件安装 / 卸载 / 启用禁用、从 GitHub 一键下载。插件自动归档存库。
+- **余额小部件** —— 主界面直接查看开放平台账户余额。
 
 ![插件市场演示 1](screenshots/plugin-market-1.png)
 
 ![插件市场演示 2](screenshots/plugin-market-2.png)
 
-## 功能特性
-
-- **一键式安装 / 快速离线部署** —— 无需安装 Node.js、无需源码,一键部署便携 Node + dsh 运行环境,部署完即可直接使用,全程离线可用。
-- **快捷API切换** —— 类似于cc-switch，对于想要使用其他非DeepSeek api的用户的选项，可以自定义接入任意厂商，随时切换。
-- **客户端界面** —— 所有操作都在本地桌面应用内完成;DSH Web 界面可直接嵌入应用内使用(支持中文输入法),无需跳转浏览器。
-- **快捷的启动与重启** —— 一键启动 / 停止 / 重启 dsh,就绪后自动进入 DSH 界面。
-- **第三方插件管理** —— 浏览本地插件、安装 / 卸载 / 启用禁用、从 GitHub 一键下载。插件自动归档存库。
-- **余额小部件** —— 主界面直接查看开放平台账户余额。
-- **启动日志可视化** —— 启动失败(如依赖缺失)时直接在界面看到原因,一键修复。
 
 ## 运行模式
 
@@ -61,7 +59,7 @@ DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 
 ### 可选:一键切换 API 厂商
 
-在「设置 → API 切换」里可添加 / 切换 AI 厂商预设(DeepSeek 官方、中转、硅基流动等)。预设的地址与 API Key 会在启动时自动注入 dsh,无需再去 DSH 界面填写;切换后重启 dsh 生效。
+在「设置 → API 切换」里可添加 / 切换 AI 厂商预设(DeepSeek 官方、中转等)。预设的地址与 API Key 会在启动时自动注入 dsh,无需再去 DSH 界面填写;切换后重启 dsh 生效。
 
 ![API 切换](screenshots/quickstart-4-api-switch.png)
 
