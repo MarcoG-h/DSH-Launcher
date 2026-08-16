@@ -10,6 +10,14 @@ DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 
 ![控制台](screenshots/dashboard.png)
 
+![新版本主界面](screenshots/main-ui-1.png)
+
+![新版本主界面 2](screenshots/main-ui-2.png)
+
+![插件市场演示 1](screenshots/plugin-market-1.png)
+
+![插件市场演示 2](screenshots/plugin-market-2.png)
+
 ## 功能特性
 
 - **一键式安装 / 快速离线部署** —— 无需安装 Node.js、无需源码,一键部署便携 Node + dsh 运行环境,部署完即可直接使用,全程离线可用。
