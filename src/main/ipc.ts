@@ -27,16 +27,50 @@ export function registerIpc(): void {
   ipcMain.handle('config:set', (_e, patch: Partial<typeof getConfig>) => setConfig(patch))
 
   ipcMain.handle('plugins:list', () => plugins.listPlugins())
-  ipcMain.handle('plugins:install', (_e, spec: string) => plugins.install(getConfig().profile, String(spec)))
-  ipcMain.handle('plugins:remove', (_e, name: string) => plugins.remove(getConfig().profile, String(name)))
-  ipcMain.handle('plugins:setEnabled', (_e, name: string, enabled: boolean) =>
-    plugins.setEnabled(getConfig().profile, String(name), Boolean(enabled))
-  )
+
+  // A plugin-set change (install / remove / toggle) only takes effect once dsh
+  // re-reads its profile manifest on next boot. Restart dsh now — if it's
+  // running — so the change shows up immediately, without requiring the user to
+  // restart the whole launcher. Skipped when dsh isn't running (the change is
+  // simply picked up on next start); the running-status guard also naturally
+  // coalesces rapid back-to-back changes into a single in-flight restart.
+  const restartForPluginChange = (applied: boolean): void => {
+    if (!applied) return
+    if (harness.getState().status !== 'running') return
+    void harness.restart().then((r) => {
+      if (!r.ok) console.error('[launcher] restart after plugin change failed:', r.error)
+    })
+  }
+
+  ipcMain.handle('plugins:install', async (_e, spec: string) => {
+    const r = await plugins.install(getConfig().profile, String(spec))
+    restartForPluginChange(r.ok)
+    return r
+  })
+  ipcMain.handle('plugins:remove', async (_e, name: string) => {
+    const r = await plugins.remove(getConfig().profile, String(name))
+    restartForPluginChange(r.ok)
+    return r
+  })
+  ipcMain.handle('plugins:setEnabled', (_e, name: string, enabled: boolean) => {
+    const r = plugins.setEnabled(getConfig().profile, String(name), Boolean(enabled))
+    restartForPluginChange(r.changed)
+    return r
+  })
+  ipcMain.handle('plugins:update', async (_e, name: string) => {
+    const r = await plugins.update(getConfig().profile, String(name))
+    restartForPluginChange(r.ok)
+    return r
+  })
 
   ipcMain.handle('build:repair', () => plugins.repairDeps())
   ipcMain.handle('build:rebuild', () => plugins.rebuild())
   ipcMain.handle('download:harness', () => plugins.downloadHarness())
-  ipcMain.handle('download:plugin', (_e, url: string, subdir?: string) => plugins.downloadPlugin(String(url), subdir == null ? undefined : String(subdir)))
+  ipcMain.handle('download:plugin', async (_e, url: string, subdir?: string) => {
+    const r = await plugins.downloadPlugin(String(url), subdir == null ? undefined : String(subdir))
+    restartForPluginChange(r.ok)
+    return r
+  })
 
   // Install/upgrade of the portable runtime must not race a running harness
   // (npm writes the files the bundled dsh is executing).

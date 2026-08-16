@@ -9,6 +9,16 @@
 // y≈905-935 of 960). Instead of re-encoding, we clip the bottom strip: the
 // video is rendered objectFit:cover inside a slightly shorter overflow:hidden
 // box, top-aligned (objectPosition '50% 0%'), so only the bottom is cut off.
+//
+// Stuck-splash recovery: on some machines the splash never leaves — the video
+// either never starts (cold asar read / first-run antivirus scan stalling it at
+// 0s) or plays to the last frame and freezes there because `ended` never fires
+// (some mp4s expose a non-finite duration, so Chromium never ends the stream).
+// A progress watchdog reacts to whichever happened: once the video has started
+// and then stops advancing, it has hit the final frame, so we exit immediately;
+// if it never started at all, we refresh the window once (the media file is then
+// usually cached and plays) and, if a reloaded attempt is still stuck, skip the
+// splash so the launcher is never held hostage.
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { useHarness } from '../hooks/useHarness'
@@ -27,6 +37,19 @@ const LIGHT_EXIT_MS = 1000
 const DARK_EXIT_MS = 520
 // Absolute fallback: never leave the overlay hanging if the timeline stalls.
 const SAFETY_MS = 5400
+// Playback-progress watchdog (samples the media clock every tick).
+const STALL_TICK_MS = 1000
+// Media clock frozen for this long after playback started ⇒ the video reached
+// its last frame without `ended` firing — exit rather than wait forever.
+const END_STALL_MS = 1200
+// No playback at all for this long ⇒ the video never started. Refresh the
+// window once (the file is usually in cache by then); if a reloaded attempt is
+// still stuck, skip the splash.
+const NEVER_STARTED_MS = 4000
+const MAX_RELOADS = 1
+// sessionStorage key tracking reloads — survives location.reload(), cleared on
+// window close, so every fresh launch gets a full attempt at the splash.
+const ATTEMPT_KEY = 'dsh:splash-stuck'
 
 export function SplashOverlay({ onDone }: { onDone: () => void }): JSX.Element | null {
   const { config } = useHarness()
@@ -34,12 +57,17 @@ export function SplashOverlay({ onDone }: { onDone: () => void }): JSX.Element |
   const [exiting, setExiting] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const doneRef = useRef(false)
+  // Reloaded attempts persist across location.reload() so we don't loop forever.
+  const attemptsRef = useRef(Number(sessionStorage.getItem(ATTEMPT_KEY) ?? '0'))
   const dark = theme === 'dark'
   const enabled = config?.splashEnabled ?? true
 
   const finish = (): void => {
     if (doneRef.current) return
     doneRef.current = true
+    // A reloaded attempt that eventually completed (or was skipped) resets the
+    // counter so the next app launch gets a fresh attempt.
+    sessionStorage.removeItem(ATTEMPT_KEY)
     onDone()
   }
 
@@ -54,6 +82,10 @@ export function SplashOverlay({ onDone }: { onDone: () => void }): JSX.Element |
       return
     }
     let done = false
+    let lastTickTime = 0
+    let started = false
+    let stallMs = 0
+    let notStartedMs = 0
     const startExit = (): void => {
       if (done) return
       done = true
@@ -71,11 +103,45 @@ export function SplashOverlay({ onDone }: { onDone: () => void }): JSX.Element |
     const safety = setTimeout(() => {
       if (!done) startExit()
     }, SAFETY_MS)
+    // Watchdog for the two "stuck splash" failure modes (see header comment).
+    // It samples the media clock itself (not timeupdate, which can pause at a
+    // frame boundary), so a frozen video is detected within a tick or two.
+    const watchdog = setInterval(() => {
+      if (done || doneRef.current || v.ended || v.error) return
+      const now = v.currentTime
+      if (now > 0) started = true
+      if (now === lastTickTime) {
+        stallMs += STALL_TICK_MS
+        if (!started) notStartedMs += STALL_TICK_MS
+      } else {
+        lastTickTime = now
+        stallMs = 0
+        notStartedMs = 0
+      }
+      // Played to the end but froze on the last frame (ended never fired): exit.
+      if (started && stallMs >= END_STALL_MS) {
+        startExit()
+        return
+      }
+      // Never started at all: refresh the window once, skip if it persists.
+      if (!started && notStartedMs >= NEVER_STARTED_MS) {
+        const next = attemptsRef.current + 1
+        sessionStorage.setItem(ATTEMPT_KEY, String(next))
+        if (next <= MAX_RELOADS) {
+          console.error('[splash] video never started, refreshing window to unstick it')
+          location.reload()
+        } else {
+          console.error('[splash] video still stuck after reload, skipping splash')
+          finish()
+        }
+      }
+    }, STALL_TICK_MS)
     return () => {
       v.removeEventListener('timeupdate', onTime)
       v.removeEventListener('error', finish)
       v.removeEventListener('ended', finish)
       clearTimeout(safety)
+      clearInterval(watchdog)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, dark])

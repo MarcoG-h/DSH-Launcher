@@ -3,10 +3,11 @@ import type { JSX } from 'react'
 import { api, type PluginListResult } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
 import { useI18n } from '../i18n'
-import { TrashIcon, PlayIcon, DownloadIcon } from '../lib/icons'
+import { TrashIcon, PlayIcon, DownloadIcon, RefreshIcon } from '../lib/icons'
 import { TaskConsole } from '../components/TaskConsole'
 import { MarketTab } from '../components/MarketTab'
 import { parseGitHubUrl } from '../../../shared/github'
+import { RECOMMENDED_PLUGINS } from '../recommended'
 
 export function Plugins(): JSX.Element {
   const { config, tasks } = useHarness()
@@ -16,6 +17,8 @@ export function Plugins(): JSX.Element {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<'local' | 'market'>('local')
+  const [selectedRec, setSelectedRec] = useState<Set<string>>(() => new Set(RECOMMENDED_PLUGINS.map((r) => r.name)))
+  const [openMenu, setOpenMenu] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -49,6 +52,45 @@ export function Plugins(): JSX.Element {
       setBusy(null)
     }
   }
+
+  const toggleSelected = (name: string): void => {
+    setSelectedRec((prev) => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
+
+  const installSelected = async (): Promise<void> => {
+    const list = RECOMMENDED_PLUGINS.filter((r) => selectedRec.has(r.name))
+    if (!list.length) return
+    setBusy('install-recommended')
+    setError(null)
+    try {
+      for (const rec of list) {
+        const r = await api.downloadPlugin(rec.github)
+        if (!r.ok && r.error) {
+          setError(r.error)
+          break
+        }
+      }
+      await load()
+      setSelectedRec(new Set())
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // Close an open plugin action menu on any outside click.
+  useEffect(() => {
+    if (!openMenu) return
+    const close = (): void => setOpenMenu(null)
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [openMenu])
 
   const gh = spec.trim() ? parseGitHubUrl(spec.trim()) : null
 
@@ -147,8 +189,58 @@ export function Plugins(): JSX.Element {
           <h3 className="section-title">{t('plugins.installedTitle', { count: installed.length })}</h3>
         </div>
         {installed.length === 0 ? (
-          <div className="card p-5 text-[13px]" style={{ color: 'var(--muted)' }}>
-            {t('plugins.noInstalled')}
+          <div className="space-y-3">
+            <div className="card p-5 text-[13px]" style={{ color: 'var(--muted)' }}>
+              {t('plugins.noInstalled')}
+            </div>
+            {/* Recommended plugins — shown on the empty state so new users see
+                what's worth installing without hunting the market. One-click
+                install; after uninstall the list just reappears (nothing is
+                force-installed). */}
+            <div className="card p-5" style={{ borderColor: 'var(--accent)' }}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <span
+                  className="badge"
+                  style={{ color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 14%, transparent)' }}
+                >
+                  {t('plugins.recommendedTitle')}
+                </span>
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={busy !== null || selectedRec.size === 0}
+                  onClick={() => void installSelected()}
+                >
+                  <DownloadIcon /> {t('plugins.installAllSelected')}
+                </button>
+              </div>
+              <p className="text-[12px] mb-3" style={{ color: 'var(--muted)' }}>
+                {t('plugins.recommendedHint')}
+              </p>
+              <div className="space-y-3">
+                {RECOMMENDED_PLUGINS.map((rec) => (
+                  <label key={rec.name} className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={selectedRec.has(rec.name)}
+                      onChange={() => toggleSelected(rec.name)}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <span className="mono text-[13px] font-semibold">{rec.name}</span>
+                      <p className="mt-0.5 text-[12.5px] leading-relaxed" style={{ color: 'var(--muted)' }}>
+                        {t(rec.descKey)}
+                      </p>
+                    </div>
+                    <span
+                      className="badge shrink-0 self-center"
+                      style={{ color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 12%, transparent)' }}
+                    >
+                      @{rec.author}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
         ) : (
           <div className="grid gap-2.5">
@@ -187,7 +279,7 @@ export function Plugins(): JSX.Element {
                       {p.localPath ?? p.spec}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="relative flex items-center gap-1.5 shrink-0">
                     {p.enabled ? (
                       <button
                         className="btn btn-ghost btn-sm"
@@ -205,18 +297,49 @@ export function Plugins(): JSX.Element {
                         {t('plugins.enable')}
                       </button>
                     )}
-                    <button
-                      className="btn btn-danger btn-sm"
-                      disabled={busy !== null}
-                      title={t('plugins.uninstallTitle')}
-                      onClick={() => {
-                        if (window.confirm(t('plugins.confirmRemove', { name: p.name }))) {
-                          void run(`remove:${p.name}`, () => api.removePlugin(p.name))
-                        }
-                      }}
-                    >
-                      <TrashIcon /> {t('plugins.uninstall')}
-                    </button>
+                    <div className="flex items-center">
+                      <button
+                        className="btn btn-danger btn-sm"
+                        style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+                        disabled={busy !== null}
+                        title={t('plugins.uninstallTitle')}
+                        onClick={() => {
+                          if (window.confirm(t('plugins.confirmRemove', { name: p.name }))) {
+                            void run(`remove:${p.name}`, () => api.removePlugin(p.name))
+                          }
+                        }}
+                      >
+                        <TrashIcon /> {t('plugins.uninstall')}
+                      </button>
+                      <button
+                        className="btn btn-danger btn-sm"
+                        style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: '1px solid rgba(255,255,255,0.25)', fontSize: 16, padding: '0 5px' }}
+                        disabled={busy !== null}
+                        title={t('plugins.update')}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setOpenMenu(openMenu === p.name ? null : p.name)
+                        }}
+                      >
+                        ▾
+                      </button>
+                    </div>
+                    {openMenu === p.name && (
+                      <div className="absolute right-0 top-full mt-1 z-20 card p-1">
+                        <button
+                          className="btn btn-ghost btn-sm w-full"
+                          disabled={busy !== null}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setOpenMenu(null)
+                            void run(`update:${p.name}`, () => api.updatePlugin(p.name))
+                          }}
+                          style={{ color: 'var(--warn)' }}
+                        >
+                          <RefreshIcon /> {t('plugins.update')}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -311,6 +434,9 @@ export function Plugins(): JSX.Element {
           </div>
         )}
       </section>
+        <p className="pt-1 text-[11px]" style={{ color: 'var(--muted)' }}>
+          {t('plugins.restartHint')}
+        </p>
         </>
       )}
     </div>

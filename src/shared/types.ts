@@ -213,6 +213,8 @@ export interface DshLauncherApi {
   listPlugins(): Promise<PluginListResult>
   installPlugin(spec: string): Promise<CmdResult>
   removePlugin(name: string): Promise<CmdResult>
+  /** Reinstall/update an installed plugin (git pull + reinstall for `file:` plugins, `dsh plugin up` otherwise). */
+  updatePlugin(name: string): Promise<CmdResult>
   setPluginEnabled(name: string, enabled: boolean): Promise<{ ok: boolean; changed: boolean; bundles: string[] }>
   repairDeps(): Promise<CmdResult>
   rebuild(): Promise<CmdResult>

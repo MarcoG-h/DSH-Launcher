@@ -72,3 +72,7 @@ pnpm build      # build
 ## License
 
 MIT
+
+## Acknowledgements
+
+Thanks to [baihejiangnan](https://github.com/baihejiangnan) for the "Better Context Menu" plugin ([dsh-session-context-menu](https://github.com/baihejiangnan/dsh-session-context-menu)), which brings a native-style context menu to the launcher-packaged DSH and is featured as a recommended plugin in this launcher. More developers are welcome to join the DSH plugin ecosystem and refine the desktop-shell experience together.

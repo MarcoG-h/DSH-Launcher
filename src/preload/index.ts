@@ -12,6 +12,7 @@ const api: DshLauncherApi = {
   listPlugins: () => ipcRenderer.invoke('plugins:list'),
   installPlugin: (spec) => ipcRenderer.invoke('plugins:install', spec),
   removePlugin: (name) => ipcRenderer.invoke('plugins:remove', name),
+  updatePlugin: (name) => ipcRenderer.invoke('plugins:update', name),
   setPluginEnabled: (name, enabled) => ipcRenderer.invoke('plugins:setEnabled', name, enabled),
   repairDeps: () => ipcRenderer.invoke('build:repair'),
   rebuild: () => ipcRenderer.invoke('build:rebuild'),

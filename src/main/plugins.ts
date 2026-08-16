@@ -71,8 +71,9 @@ export function listInstalled(profile: string): { installed: InstalledPlugin[]; 
     } catch {
       /* uninstalled / broken — show with empty metadata */
     }
-    if (spec.startsWith('file:')) {
-      const p = spec.slice('file:'.length)
+    const localSpec = spec.match(/^(?:file|link):(.+)$/)
+    if (localSpec) {
+      const p = localSpec[1]
       try {
         localPath = realpathSync(resolve(dir, p))
       } catch {
@@ -135,6 +136,37 @@ export async function install(profile: string, spec: string): Promise<CmdResult>
 export async function remove(profile: string, name: string): Promise<CmdResult> {
   const { cmd, args, cwd, envPatch } = dshPluginCmd(profile, ['remove', name])
   return runAsync(cmd, args, cwd, `remove:${name}`, process.platform === 'win32', envPatch)
+}
+
+/**
+ * Update / reinstall a plugin. Plugins installed via downloadPlugin live in a
+ * git clone under pluginDir (a `file:` dependency) — updating them means
+ * git pull + reinstall. Any other spec (github:/npm) updates via `dsh plugin up`.
+ */
+export async function update(profile: string, name: string): Promise<CmdResult> {
+  const dir = profileDir(profile)
+  const manifest = readJson(join(dir, 'package.json'))
+  const spec = String((manifest?.dependencies as Record<string, string> | undefined)?.[name] ?? '')
+  const label = `update:${name}`
+
+  const local = spec.match(/^(?:file|link):(.+)$/)
+  if (local) {
+    const p = local[1]
+    let localPath: string
+    try {
+      localPath = realpathSync(resolve(dir, p))
+    } catch {
+      localPath = resolve(dir, p)
+    }
+    if (existsSync(join(localPath, '.git'))) {
+      const pull = await runAsync('git', ['-C', localPath, 'pull', '--ff-only'], process.cwd(), label, process.platform === 'win32', GIT_ENV, GIT_TIMEOUT_MS)
+      if (!pull.ok) taskLine(label, t('[update] 拉取失败，继续重装现有代码。', '[update] Pull failed; reinstalling existing code.'), 'stderr')
+    }
+    return install(profile, localPath)
+  }
+
+  const { cmd, args, cwd, envPatch } = dshPluginCmd(profile, ['up', name])
+  return runAsync(cmd, args, cwd, label, process.platform === 'win32', envPatch)
 }
 
 /** Toggle a bundle in the profile manifest without touching the installed dependency. */

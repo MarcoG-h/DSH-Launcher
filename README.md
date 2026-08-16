@@ -83,3 +83,7 @@ MIT
 ## 其他
 
 **十分感谢各位的支持！欢迎使用Issue功能或Email与我交流！（可以是功能的建议、bug的反馈或者单纯想要聊聊）**
+
+## 鸣谢
+
+感谢 [baihejiangnan](https://github.com/baihejiangnan) 提供的「更好的右键菜单」插件（[dsh-session-context-menu](https://github.com/baihejiangnan/dsh-session-context-menu)），为启动器封装版 DSH 带来了原生风格的右键交互体验，并被收录为本启动器的推荐插件。欢迎更多开发者参与 DSH 插件生态建设，一起完善桌面封装端的体验。
