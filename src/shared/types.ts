@@ -53,6 +53,14 @@ export interface LauncherConfig {
   activeApiPresetId: string
   /** UI + main-process log language. Defaults from the system locale on first run. */
   language: 'zh' | 'en'
+  /** Hide to the system tray on window close instead of quitting. */
+  closeToTray: boolean
+  /** DSH view: replace the collapsed whale rail with a draggable floating orb. Default off. */
+  floatingWhale: boolean
+  /** How many plugin-market entries are fetched per page (10–50). */
+  marketPageSize: number
+  /** Optional GitHub personal access token, used to clone private plugin repos. */
+  githubToken?: string
 }
 
 /** An OpenAI-compatible API vendor preset: model base URL + optional balance endpoint. */
@@ -126,6 +134,16 @@ export interface CmdResult {
   ok: boolean
   code: number | null
   error?: string
+  /** When a repo ships several plugin packages (e.g. skins in subdirs), the caller can choose one. */
+  packages?: PluginSubPackage[]
+}
+
+/** A plugin package found inside a cloned repo (the repo root may not be one itself). */
+export interface PluginSubPackage {
+  /** Repo-relative directory of the package, e.g. 'maid-atelier'. */
+  path: string
+  /** Package name from its package.json. */
+  name: string
 }
 
 export interface BalanceData {
@@ -196,21 +214,35 @@ export interface DshLauncherApi {
   rebuild(): Promise<CmdResult>
   /** Clone/update the harness repo, install deps, then auto-configure paths. */
   downloadHarness(): Promise<CmdResult>
-  /** Clone a plugin from a GitHub repo URL into pluginDir, then install it. */
-  downloadPlugin(url: string): Promise<CmdResult>
+  /** Clone a plugin from a GitHub repo URL into pluginDir, then install it. An optional repo-relative subdir installs that sub-package (some repos ship plugins in subfolders). */
+  downloadPlugin(url: string, subdir?: string): Promise<CmdResult>
   /** Download + unpack the portable runtime (Node, bundled dsh, pnpm) and auto-configure paths. */
   installRuntime(): Promise<CmdResult>
   /** Upgrade only the bundled dsh package inside runtimeRoot; leaves ~/.dsh untouched. */
   updateRuntime(): Promise<CmdResult>
   /** DeepSeek balance for the configured API key. */
   getBalance(): Promise<BalanceResult>
-  /** One page of the plugin market: GitHub repos tagged `dsh-plugin`, sorted by stars. */
-  searchMarket(page: number): Promise<MarketPage>
+  /** One page of the plugin market: GitHub repos tagged `dsh-plugin`, sorted by stars. An optional keyword is searched server-side. */
+  searchMarket(page: number, query?: string): Promise<MarketPage>
   /** Raw markdown of a repository README for the market detail modal. */
   fetchMarketReadme(owner: string, repo: string): Promise<MarketReadme>
+  /** Show a confirm dialog for an external link, then open it in the system browser if confirmed. */
+  confirmOpenExternal(url: string): Promise<boolean>
   /** Show/hide the embedded DSH view; reload when the harness (re)became ready. */
   setDshActive(active: boolean, reload?: boolean): void
   /** Sync the sidebar width so the DSH view sits flush against it. */
   setDshSidebarWidth(width: number): void
+  /** Show/hide the floating whale orb (used while the DSH view is open with floatingWhale enabled). */
+  setOrbVisible(visible: boolean): void
+  /** The orb page: press start, reporting the pointer offset within the orb view. */
+  orbDragStart(ox: number, oy: number): void
+  /** The orb page: pointer's absolute screen position while dragging (the view follows it). */
+  orbDragMove(sx: number, sy: number): void
+  /** The orb page: drag finished (position kept). */
+  orbDragEnd(): void
+  /** The orb page: short click — return the orb to the top-left and expand the menu. */
+  orbClick(): void
+  /** Fired when the floating orb is clicked — the launcher should expand its sidebar. */
+  onOrbClicked(cb: () => void): () => void
   onEvent(cb: (e: LauncherEvent) => void): () => void
 }

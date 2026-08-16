@@ -12,6 +12,7 @@ import {
   MoonIcon
 } from '../lib/icons'
 import { StatusPill } from './StatusPill'
+import whaleIcon from '../assets/whale.png'
 
 export type PageId = 'dashboard' | 'plugins' | 'settings'
 
@@ -20,9 +21,11 @@ interface SidebarProps {
   setView: (v: PageId | 'dsh') => void
   collapsed: boolean
   setCollapsed: (b: boolean) => void
+  /** Current rail width (0 when the floating orb hides it entirely). */
+  width: number
 }
 
-export function Sidebar({ view, setView, collapsed, setCollapsed }: SidebarProps): JSX.Element {
+export function Sidebar({ view, setView, collapsed, setCollapsed, width }: SidebarProps): JSX.Element {
   const { state, config, runningTasks } = useHarness()
   const [theme, toggleTheme] = useTheme()
   const { lang, t, setLang } = useI18n()
@@ -41,21 +44,34 @@ export function Sidebar({ view, setView, collapsed, setCollapsed }: SidebarProps
     { id: 'settings', label: t('nav.settings'), icon: <GearIcon /> }
   ]
 
-  const width = collapsed ? 56 : 212
+  // Inside the DSH view with the rail collapsed, the whole menu tucks onto the
+  // whale: only the whale shows, and clicking it expands the menu again.
+  const dshRail = view === 'dsh' && collapsed
+  const hidden = width <= 0
 
   return (
     <aside
-      className="shrink-0 flex flex-col border-r transition-[width] duration-150"
-      style={{ width, borderColor: 'var(--border)', background: 'var(--panel)' }}
+      className="shrink-0 flex flex-col border-r overflow-hidden transition-[width] duration-150"
+      style={{
+        width,
+        borderColor: hidden ? 'transparent' : 'var(--border)',
+        background: 'var(--panel)',
+        // easeOutCubic — must match the DSH view animation in App.tsx so the
+        // native view slides in step with the rail.
+        transitionTimingFunction: 'cubic-bezier(0.215, 0.61, 0.355, 1)'
+      }}
     >
-      {/* Logo */}
-      <div className="flex items-center gap-2.5 px-3.5 h-[58px] overflow-hidden shrink-0">
-        <div
-          className="w-8 h-8 rounded-[10px] flex items-center justify-center text-white font-bold text-[15px] shrink-0"
-          style={{ background: 'linear-gradient(135deg,#1783ff,#0b5ed7)' }}
+      {/* Logo — the whale is the handle: click it to expand the collapsed DSH rail / collapse when open.
+          The whale stays put (left-aligned) in both states so collapsing/expanding never makes it jump. */}
+      <div className="flex items-center h-[58px] overflow-hidden shrink-0 gap-2.5 px-3.5">
+        <button
+          className="w-8 h-8 rounded-[10px] flex items-center justify-center overflow-hidden shrink-0 cursor-pointer select-none"
+          style={{ background: '#fff', border: '1px solid rgba(128,128,128,0.25)' }}
+          title={collapsed ? t('sidebar.expand') : t('sidebar.collapse')}
+          onClick={() => setCollapsed(!collapsed)}
         >
-          D
-        </div>
+          <img src={whaleIcon} alt="" className="w-7 h-7 object-contain" draggable={false} />
+        </button>
         {!collapsed && (
           <div className="min-w-0">
             <div className="text-[14px] font-semibold leading-tight truncate">DSH Launcher</div>
@@ -66,7 +82,8 @@ export function Sidebar({ view, setView, collapsed, setCollapsed }: SidebarProps
         )}
       </div>
 
-      {/* Nav */}
+      {/* Nav — icon-only thumbnails when the DSH rail is collapsed; clicking a
+          thumbnail expands the menu and jumps to that page. */}
       <nav className="flex-1 px-2.5 py-2 space-y-1 overflow-y-auto">
         {items.map((item) => {
           const active = view === item.id
@@ -74,7 +91,14 @@ export function Sidebar({ view, setView, collapsed, setCollapsed }: SidebarProps
             <button
               key={item.id}
               disabled={item.disabled}
-              onClick={() => setView(item.id)}
+              onClick={() => {
+                if (dshRail) setCollapsed(false)
+                // From the collapsed DSH rail the current view is already 'dsh';
+                // the 'dsh' item only needs to expand — re-routing through the
+                // App-level setView wrapper would force-collapse the rail again.
+                if (dshRail && item.id === 'dsh') return
+                setView(item.id)
+              }}
               title={collapsed ? item.label : undefined}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[9px] text-[13px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               style={{
@@ -92,7 +116,8 @@ export function Sidebar({ view, setView, collapsed, setCollapsed }: SidebarProps
         })}
       </nav>
 
-      {/* Footer */}
+      {/* Footer — hidden in the DSH rail */}
+      {!dshRail && (
       <div className="px-3 py-3 border-t space-y-2 shrink-0" style={{ borderColor: 'var(--border)' }}>
         {runningTasks.length > 0 && (
           <div
@@ -133,6 +158,7 @@ export function Sidebar({ view, setView, collapsed, setCollapsed }: SidebarProps
           </div>
         )}
       </div>
+      )}
     </aside>
   )
 }

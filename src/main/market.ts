@@ -2,11 +2,16 @@
 // README fetching for the detail modal. Uses Electron's `net.fetch` so requests
 // route through the system proxy (important for users behind GFW).
 import { net } from 'electron'
+import { getConfig } from './config'
 import { t } from './i18n'
 import type { MarketPage, MarketReadme, MarketRepo } from '../shared/types'
 
 const API = 'https://api.github.com'
-const PER_PAGE = 30
+
+function perPage(): number {
+  const n = getConfig().marketPageSize
+  return Math.min(50, Math.max(10, Number.isFinite(n) ? Math.floor(n) : 30))
+}
 
 function ua(): string {
   return 'dsh-launcher/1.0.0 (https://github.com/MarcoG-h/DSH-Launcher)'
@@ -23,12 +28,17 @@ async function gh(path: string, accept = 'application/vnd.github+json'): Promise
   return { status: res.status, body }
 }
 
-/** Page 1..N of the market, sorted by stars desc. Unauthenticated GitHub API. */
-export async function searchMarket(page: number): Promise<MarketPage> {
+/**
+ * Page 1..N of the market, sorted by stars desc. A `query` adds a keyword to
+ * the GitHub search so results span the whole topic, not just the current page.
+ * Unauthenticated GitHub API.
+ */
+export async function searchMarket(page: number, query?: string): Promise<MarketPage> {
   const p = Math.max(1, Math.floor(Number(page) || 1))
-  const q = 'topic:dsh-plugin'
+  const kw = String(query ?? '').trim()
+  const q = kw ? `topic:dsh-plugin ${kw}` : 'topic:dsh-plugin'
   const { status, body } = await gh(
-    `/search/repositories?q=${encodeURIComponent(q)}&sort=stars&order=desc&per_page=${PER_PAGE}&page=${p}`
+    `/search/repositories?q=${encodeURIComponent(q)}&sort=stars&order=desc&per_page=${perPage()}&page=${p}`
   )
 
   if (status === 403) {

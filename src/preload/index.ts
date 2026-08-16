@@ -16,14 +16,27 @@ const api: DshLauncherApi = {
   repairDeps: () => ipcRenderer.invoke('build:repair'),
   rebuild: () => ipcRenderer.invoke('build:rebuild'),
   downloadHarness: () => ipcRenderer.invoke('download:harness'),
-  downloadPlugin: (url) => ipcRenderer.invoke('download:plugin', url),
+  downloadPlugin: (url, subdir) => ipcRenderer.invoke('download:plugin', url, subdir),
   installRuntime: () => ipcRenderer.invoke('runtime:install'),
   updateRuntime: () => ipcRenderer.invoke('runtime:update'),
   getBalance: () => ipcRenderer.invoke('balance:get'),
-  searchMarket: (page) => ipcRenderer.invoke('market:search', page),
+  searchMarket: (page, query) => ipcRenderer.invoke('market:search', page, query),
   fetchMarketReadme: (owner, repo) => ipcRenderer.invoke('market:readme', owner, repo),
+  confirmOpenExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   setDshActive: (active, reload) => ipcRenderer.send('dsh:set-active', active, reload),
   setDshSidebarWidth: (width) => ipcRenderer.send('dsh:set-sidebar-width', width),
+  setOrbVisible: (visible) => ipcRenderer.send('orb:set-visible', visible),
+  orbDragStart: (ox, oy) => ipcRenderer.send('orb:drag-start', ox, oy),
+  orbDragMove: (sx, sy) => ipcRenderer.send('orb:drag-move', sx, sy),
+  orbDragEnd: () => ipcRenderer.send('orb:drag-end'),
+  orbClick: () => ipcRenderer.send('orb:click'),
+  onOrbClicked: (cb) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('orb:clicked', listener)
+    return () => {
+      ipcRenderer.removeListener('orb:clicked', listener)
+    }
+  },
   onEvent: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, data: LauncherEvent): void => cb(data)
     ipcRenderer.on('harness:event', listener)

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { JSX } from 'react'
-import { api, type MarketReadme, type MarketRepo } from '../lib/api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { JSX, MouseEvent } from 'react'
+import { api, type CmdResult, type MarketReadme, type MarketRepo, type PluginSubPackage } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
 import { useI18n } from '../i18n'
 import { renderMarkdown } from '../lib/markdown'
@@ -24,9 +24,14 @@ interface Props {
 export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props): JSX.Element {
   const { t, lang } = useI18n()
   const { tasks } = useHarness()
+  const readmeRef = useRef<HTMLDivElement>(null)
   const [readme, setReadme] = useState<MarketReadme | null>(null)
   const [readmeLoading, setReadmeLoading] = useState(true)
   const [installing, setInstalling] = useState(false)
+  // When a repo ships several plugin packages in subdirectories, the first
+  // install returns a list instead of installing; the chooser below picks one.
+  const [pendingPkgs, setPendingPkgs] = useState<PluginSubPackage[] | null>(null)
+  const [installError, setInstallError] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -51,14 +56,43 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
       .sort((a, b) => b.updatedAt - a.updatedAt)[0]
   }, [tasks, repo.repo])
 
-  const doInstall = async (): Promise<void> => {
+  const doInstall = async (subdir?: string): Promise<void> => {
     setInstalling(true)
+    setInstallError(null)
     try {
-      await api.downloadPlugin(`github:${repo.fullName}`)
-      onInstalled()
+      const r: CmdResult = await api.downloadPlugin(`github:${repo.fullName}`, subdir)
+      if (r.ok) {
+        setPendingPkgs(null)
+        onInstalled()
+      } else if (r.packages?.length) {
+        // Multi-package repo: the clone succeeded but we need the user to pick.
+        setPendingPkgs(r.packages)
+      } else if (r.error) {
+        setInstallError(r.error)
+      }
     } finally {
       setInstalling(false)
     }
+  }
+
+  // Route README clicks: `#anchor` scrolls in-page; anything else is confirmed
+  // in a native dialog and opened via the system browser. Never lets the
+  // launcher window navigate to the link.
+  const onReadmeClick = (e: MouseEvent<HTMLDivElement>): void => {
+    const anchor = (e.target as HTMLElement).closest('a')
+    if (!anchor) return
+    const href = anchor.getAttribute('href') ?? ''
+    if (href.startsWith('#')) {
+      e.preventDefault()
+      const id = href.slice(1)
+      const target = id
+        ? readmeRef.current?.querySelector(`[id="${CSS.escape(id)}"], a[name="${CSS.escape(id)}"]`)
+        : null
+      target?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+    e.preventDefault()
+    void api.confirmOpenExternal(href)
   }
 
   return (
@@ -121,9 +155,11 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
 
         {/* actions */}
         <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3" style={{ borderColor: 'var(--border)' }}>
-          <button className="btn btn-primary btn-sm" disabled={isInstalled || installing || marketTask?.running} onClick={() => void doInstall()}>
-            <DownloadIcon /> {isInstalled ? t('market.installed') : installing || marketTask?.running ? '…' : t('market.install')}
-          </button>
+          {!pendingPkgs && (
+            <button className="btn btn-primary btn-sm" disabled={isInstalled || installing || marketTask?.running} onClick={() => void doInstall()}>
+              <DownloadIcon /> {isInstalled ? t('market.installed') : installing || marketTask?.running ? '…' : t('market.install')}
+            </button>
+          )}
           <a className="btn btn-ghost btn-sm" href={repo.htmlUrl} target="_blank" rel="noreferrer">
             GitHub ↗
           </a>
@@ -131,6 +167,39 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
             {t('market.updated', { date: fmtDate(repo.updatedAt, lang) })} · {repo.forks} forks
           </span>
         </div>
+
+        {/* subpackage chooser: the repo ships several installable packages in subdirectories */}
+        {pendingPkgs && (
+          <div className="space-y-1.5 border-b px-4 py-3" style={{ borderColor: 'var(--border)' }}>
+            <p className="text-[12.5px] font-medium">{t('market.multiPackage')}</p>
+            {pendingPkgs.map((p) => (
+              <button
+                key={p.path}
+                className="flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-left transition-colors"
+                style={{ borderColor: 'var(--border)' }}
+                disabled={installing}
+                onClick={() => void doInstall(p.path)}
+                onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+                onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--border)')}
+              >
+                <span className="min-w-0">
+                  <span className="mono block truncate text-[12.5px] font-semibold">{p.name}</span>
+                  <span className="text-[11px]" style={{ color: 'var(--muted)' }}>
+                    {p.path}/
+                  </span>
+                </span>
+                <span className="btn btn-primary btn-sm shrink-0">{t('market.installSub')}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* install error surfaced from downloadPlugin (e.g. repo has no dsh plugin) */}
+        {installError && (
+          <div className="border-b px-4 py-3 text-[12.5px]" style={{ borderColor: 'var(--border)', color: 'var(--warn)' }}>
+            {installError}
+          </div>
+        )}
 
         {/* install task progress */}
         {marketTask && (
@@ -148,7 +217,9 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
             </p>
           ) : readme?.ok ? (
             <div
+              ref={readmeRef}
               className="market-md"
+              onClick={onReadmeClick}
               dangerouslySetInnerHTML={{
                 __html: renderMarkdown(readme.text ?? '', {
                   raw: `https://raw.githubusercontent.com/${repo.fullName}/${repo.defaultBranch}/`,

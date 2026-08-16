@@ -30,8 +30,13 @@ function formatElapsed(s: number): string {
   return r > 0 ? t(`${m} 分 ${r} 秒`, `${m} min ${r} sec`) : t(`${m} 分`, `${m} min`)
 }
 
-/** Stream a child process and broadcast its output as a task. */
-export function runAsync(cmd: string, args: string[], cwd: string, label: string, useShell: boolean, envPatch?: NodeJS.ProcessEnv): Promise<CmdResult> {
+/**
+ * Stream a child process and broadcast its output as a task.
+ * `timeoutMs` (optional) kills the whole process tree after the deadline with a
+ * clear error — guards against e.g. `git` waiting forever for a credential
+ * prompt that has no terminal to read from.
+ */
+export function runAsync(cmd: string, args: string[], cwd: string, label: string, useShell: boolean, envPatch?: NodeJS.ProcessEnv, timeoutMs?: number, redact?: string): Promise<CmdResult> {
   return new Promise((resolve) => {
     broadcast({ type: 'task', task: { label, status: 'start', code: null } })
     let child: ReturnType<typeof spawn>
@@ -48,8 +53,24 @@ export function runAsync(cmd: string, args: string[], cwd: string, label: string
       resolve({ ok: false, code: null, error })
       return
     }
+
+    let settled = false
+    let timedOut = false
+    let timer: NodeJS.Timeout | null = null
+    const finish = (result: CmdResult): void => {
+      if (settled) return
+      settled = true
+      if (timer) {
+        clearTimeout(timer)
+        timer = null
+      }
+      resolve(result)
+    }
+
+    const safe = (line: string): string => (redact ? line.split(redact).join('***') : line)
     const emit = (stream: 'stdout' | 'stderr') => (chunk: Buffer) => {
-      for (const line of chunk.toString('utf8').replace(ANSI, '').split(/\r?\n/)) {
+      for (const raw of chunk.toString('utf8').replace(ANSI, '').split(/\r?\n/)) {
+        const line = safe(raw)
         if (line.trim()) broadcast({ type: 'task', task: { label, status: 'start', code: null, stream, line } })
       }
     }
@@ -66,6 +87,24 @@ export function runAsync(cmd: string, args: string[], cwd: string, label: string
     const touch = (): void => {
       lastOutput = Date.now()
     }
+
+    if (timeoutMs && timeoutMs > 0) {
+      timer = setTimeout(() => {
+        if (settled) return
+        timedOut = true
+        try {
+          if (process.platform === 'win32' && child.pid) {
+            // Kill the whole tree (shell:true wraps git in cmd.exe on Windows).
+            spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true })
+          } else {
+            child.kill('SIGKILL')
+          }
+        } catch {
+          /* ignore — close event settles the promise */
+        }
+      }, timeoutMs)
+    }
+
     child.stdout?.on('data', (c) => {
       touch()
       emit('stdout')(c)
@@ -77,12 +116,23 @@ export function runAsync(cmd: string, args: string[], cwd: string, label: string
     child.on('error', (err) => {
       stopWatchdog()
       broadcast({ type: 'task', task: { label, status: 'end', code: null } })
-      resolve({ ok: false, code: null, error: err.message })
+      finish({ ok: false, code: null, error: err.message })
     })
     child.on('close', (code) => {
       stopWatchdog()
       broadcast({ type: 'task', task: { label, status: 'end', code } })
-      resolve({ ok: code === 0, code })
+      if (timedOut) {
+        finish({
+          ok: false,
+          code: null,
+          error: t(
+            '操作超时,已终止。可能网络较慢,或该仓库为私有/不存在(需登录,可在 设置→系统管理 填写 GitHub 访问令牌)。',
+            'Operation timed out and was aborted. The network may be slow, or the repo is private/nonexistent (login required — add a GitHub access token in Settings → System).'
+          )
+        })
+      } else {
+        finish({ ok: code === 0, code })
+      }
     })
   })
 }

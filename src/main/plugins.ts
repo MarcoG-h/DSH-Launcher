@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join, resolve, sep } from 'node:path'
+import { net } from 'electron'
 import { getConfig, setConfig } from './config'
 import { t } from './i18n'
 import { bundledEnv, resolveBundledNode } from './runtime'
@@ -185,6 +186,126 @@ export function rebuild(): Promise<CmdResult> {
 
 // --- downloads ---
 
+// `git` must never sit waiting for a credential prompt — the launcher has no
+// terminal to answer it, and a private/missing repo would otherwise hang the
+// install forever. GIT_TERMINAL_PROMPT=0 makes git fail fast instead.
+const GIT_ENV: NodeJS.ProcessEnv = { GIT_TERMINAL_PROMPT: '0' }
+const GIT_TIMEOUT_MS = 6 * 60_000
+
+/** Attach a personal access token to an https GitHub clone URL (for private repos). */
+function authedCloneUrl(url: string, token: string | undefined): string {
+  if (!token) return url
+  return url.replace('https://github.com/', `https://${encodeURIComponent(token)}@github.com/`)
+}
+
+/**
+ * A clone that was killed mid-download leaves a directory containing only a
+ * `.git` skeleton (no worktree). That is not a usable repo — a later download
+ * would see the `.git` and try a doomed `git pull` on it. Detect and wipe it
+ * so the next attempt starts from a clean shallow clone.
+ */
+function isIncompleteGitDir(dir: string): boolean {
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true })
+    return entries.length === 1 && entries[0].name === '.git' && entries[0].isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Shallow clone args. Plugin repos are code, not history — `--depth 1` cuts the
+ * transfer from the full repo size to a single snapshot, which is the difference
+ * between a 16 s install and a 6-minute stall that times out (e.g. a 78 MB repo
+ * over a slow connection). `--branch` must precede the URL, so we build the full
+ * arg list here.
+ */
+function cloneArgs(url: string, target: string, ref?: string): string[] {
+  const args = ['clone', '--depth', '1']
+  if (ref) args.push('--branch', ref)
+  args.push(url, target)
+  return args
+}
+
+/**
+ * A repo can carry the `dsh-plugin` topic without being installable as a plugin
+ * — e.g. skin-distribution monorepos whose real package lives in a subdirectory
+ * (dsh-deep-whale ships the installable skin under `maid-atelier/`). Only install
+ * dirs that actually look like a dsh plugin, so a bad download never leaves a
+ * broken `link:`/`file:` dependency in the profile that breaks the harness boot.
+ */
+function looksLikeDshPlugin(target: string): { ok: boolean; reason?: string } {
+  const pkg = readJson(join(target, 'package.json'))
+  if (!pkg || typeof pkg !== 'object') {
+    return {
+      ok: false,
+      reason: t('仓库根目录没有 package.json — 它不是可直接安装的 dsh 插件(可能是皮肤/合集仓库,可装的子包在子目录里)。', 'The repo has no package.json at its root — not an installable dsh plugin (it may be a skin/collection repo with the real package in a subdirectory).')
+    }
+  }
+  if (typeof pkg.name !== 'string' || !pkg.name) {
+    return { ok: false, reason: t('package.json 缺少 name 字段。', 'package.json is missing the name field.') }
+  }
+  if (!pkg.dsh || typeof pkg.dsh !== 'object') {
+    return {
+      ok: false,
+      reason: t(`该包(${String(pkg.name)})没有 dsh 配置,不是 dsh 插件。`, `Package (${String(pkg.name)}) has no dsh config — not a dsh plugin.`)
+    }
+  }
+  return { ok: true }
+}
+
+/**
+ * Cheap pre-flight before cloning: skip repos that provably contain no
+ * `package.json` anywhere, so we don't pull tens of MB only to reject them.
+ * A repo may legitimately have no root package.json (plugins shipped in
+ * subdirectories, e.g. `dsh-deep-whale` keeps the installable skin under
+ * `maid-atelier/`) — this only rejects repos with no package.json at all.
+ * Fail-open: if the API is rate-limited or flaky we return null and still
+ * clone, since the local scan protects the profile either way.
+ */
+async function hasAnyPackageJson(gh: { owner: string; repo: string }): Promise<boolean | null> {
+  try {
+    const res = await net.fetch(
+      `https://api.github.com/repos/${encodeURIComponent(gh.owner)}/${encodeURIComponent(gh.repo)}/git/trees/HEAD?recursive=1`,
+      { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-launcher/1.0.0' } }
+    )
+    if (res.status === 404) return false
+    if (res.status === 401 || res.status === 403) return null // rate-limited / auth — fail open
+    if (!res.ok) return null
+    const body = (await res.json()) as { tree?: Array<{ path?: string }> } | null
+    const paths = (body?.tree ?? []).map((t) => t.path ?? '')
+    return paths.some((p) => p === 'package.json' || p.endsWith('/package.json'))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Find plugin packages inside a cloned repo whose own root is not one (e.g.
+ * skin/collection repos). Scans immediate subdirectories for `package.json`
+ * files that declare a `dsh` config — the same shape `looksLikeDshPlugin`
+ * checks. Skips `node_modules` / `.git`.
+ */
+function findPluginSubpackages(target: string): Array<{ path: string; name: string }> {
+  const out: Array<{ path: string; name: string }> = []
+  let entries: string[]
+  try {
+    entries = readdirSync(target, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name !== 'node_modules' && e.name !== '.git')
+      .map((e) => e.name)
+  } catch {
+    return out
+  }
+  for (const name of entries) {
+    const pkg = readJson(join(target, name, 'package.json'))
+    const dsh = pkg?.dsh
+    if (pkg && typeof pkg.name === 'string' && dsh && typeof dsh === 'object') {
+      out.push({ path: name, name: pkg.name })
+    }
+  }
+  return out
+}
+
 /**
  * One-click harness install: clone/update the repo, install deps, then
  * auto-configure the launcher's paths so it points at the downloaded repo.
@@ -195,16 +316,19 @@ export async function downloadHarness(): Promise<CmdResult> {
   const target = resolve(cfg.harnessRepo || join(homedir(), 'deepseek-harness'))
   const label = 'download:harness'
 
+  if (isIncompleteGitDir(target)) rmSync(target, { recursive: true, force: true })
   const isGit = existsSync(join(target, '.git'))
   if (isGit) {
-    const pull = await runAsync('git', ['-C', target, 'pull', '--ff-only'], process.cwd(), label, process.platform === 'win32')
+    const pull = await runAsync('git', ['-C', target, 'pull', '--ff-only'], process.cwd(), label, process.platform === 'win32', GIT_ENV, GIT_TIMEOUT_MS)
     if (!pull.ok) taskLine(label, t('[download] 拉取未完成(可能有本地改动),继续使用现有代码。', '[download] Pull incomplete (possible local changes); using existing code.'), 'stderr')
   } else if (existsSync(target) && readdirSync(target).length > 0) {
     taskLine(label, t('[download] 目标目录非空且非 git 仓库,跳过克隆,仅安装依赖。', '[download] Target dir is non-empty and not a git repo; skipping clone, installing deps only.'), 'stderr')
     taskDone(label, 0)
   } else {
-    const clone = await runAsync('git', ['clone', url, target], process.cwd(), label, process.platform === 'win32')
+    const clone = await runAsync('git', cloneArgs(authedCloneUrl(url, cfg.githubToken), target), process.cwd(), label, process.platform === 'win32', GIT_ENV, GIT_TIMEOUT_MS, cfg.githubToken)
     if (!clone.ok) {
+      // Wipe the partial clone (may only contain `.git`) so a retry starts fresh.
+      rmSync(target, { recursive: true, force: true })
       taskDone(label, clone.code ?? 1)
       return clone
     }
@@ -238,29 +362,82 @@ export async function downloadHarness(): Promise<CmdResult> {
  * Download a plugin from a GitHub repo URL: clone into pluginDir, then install
  * it into the current profile via `dsh plugin add <path>`.
  */
-export async function downloadPlugin(url: string): Promise<CmdResult> {
+export async function downloadPlugin(url: string, subdir?: string): Promise<CmdResult> {
   const cfg = getConfig()
   const gh = parseGitHubUrl(url)
   if (!gh) return { ok: false, code: null, error: t(`无法识别的 GitHub 地址: ${url}`, `Unrecognized GitHub URL: ${url}`) }
   const label = `clone:${gh.repo}`
   const target = join(cfg.pluginDir, gh.repo)
 
+  // Pre-flight: only reject repos with no package.json anywhere — a repo may
+  // legitimately ship its plugin in a subdirectory (skins/collections).
+  if (await hasAnyPackageJson(gh) === false) {
+    return {
+      ok: false,
+      code: null,
+      error: t(
+        `该仓库没有 package.json — 它不是 dsh 插件仓库。`,
+        `This repo has no package.json anywhere — it is not a dsh plugin repo.`
+      )
+    }
+  }
+
   if (!existsSync(cfg.pluginDir)) mkdirSync(cfg.pluginDir, { recursive: true })
 
+  if (isIncompleteGitDir(target)) rmSync(target, { recursive: true, force: true })
   if (existsSync(join(target, '.git'))) {
-    const pull = await runAsync('git', ['-C', target, 'pull', '--ff-only'], process.cwd(), label, process.platform === 'win32')
+    const pull = await runAsync('git', ['-C', target, 'pull', '--ff-only'], process.cwd(), label, process.platform === 'win32', GIT_ENV, GIT_TIMEOUT_MS)
     if (!pull.ok) taskLine(label, t('[download] 拉取未完成,使用现有代码。', '[download] Pull incomplete; using existing code.'), 'stderr')
   } else {
-    const args = ['clone', gh.cloneUrl, target]
-    if (gh.ref) args.push('--branch', gh.ref)
-    const clone = await runAsync('git', args, process.cwd(), label, process.platform === 'win32')
+    const clone = await runAsync('git', cloneArgs(authedCloneUrl(gh.cloneUrl, cfg.githubToken), target, gh.ref), process.cwd(), label, process.platform === 'win32', GIT_ENV, GIT_TIMEOUT_MS, cfg.githubToken)
     if (!clone.ok) {
+      // Wipe the partial clone (may only contain `.git`) so a retry starts fresh.
+      rmSync(target, { recursive: true, force: true })
       taskDone(label, clone.code ?? 1)
       return clone
     }
   }
 
-  taskLine(label, t(`[download] 已就绪: ${target} → 安装到 profile "${cfg.profile}"`, `[download] Ready: ${target} → installing into profile "${cfg.profile}"`))
+  // Resolve the installable package directory inside the clone: an explicit
+  // subdir wins, then the repo root, then the single subpackage, then ask.
+  const rootCheck = looksLikeDshPlugin(target)
+  const subpkgs = findPluginSubpackages(target)
+
+  let pkgDir: string
+  if (subdir) {
+    // Explicit choice from the UI chooser — validate, guarding path traversal.
+    const resolved = resolve(target, subdir)
+    if (resolved !== target && !resolved.startsWith(target + sep)) {
+      taskDone(label, 1)
+      return { ok: false, code: null, error: t('无效的子包路径。', 'Invalid subpackage path.') }
+    }
+    const subCheck = looksLikeDshPlugin(resolved)
+    if (!subCheck.ok) {
+      taskDone(label, 1)
+      return { ok: false, code: null, error: subCheck.reason }
+    }
+    pkgDir = resolved
+  } else if (rootCheck.ok) {
+    pkgDir = target
+  } else if (subpkgs.length === 1) {
+    pkgDir = join(target, subpkgs[0].path)
+    taskLine(label, t(`[download] 检测到插件子包 <${subpkgs[0].name}>(${subpkgs[0].path}),自动安装它。`, `[download] Found plugin subpackage <${subpkgs[0].name}> (${subpkgs[0].path}); installing it.`))
+  } else if (subpkgs.length > 1) {
+    taskLine(label, t(`[download] 该仓库包含 ${subpkgs.length} 个插件子包,请选择要安装的。`, `[download] This repo ships ${subpkgs.length} plugin subpackages — pick one to install.`), 'stderr')
+    taskDone(label, 1)
+    return {
+      ok: false,
+      code: null,
+      error: t('该仓库包含多个插件包,请选择要安装的。', 'This repo contains several plugin packages — pick one to install.'),
+      packages: subpkgs
+    }
+  } else {
+    taskLine(label, t(`[download] 已下载到 ${target},但它不是可安装的 dsh 插件 — 已跳过安装。`, `[download] Downloaded to ${target}, but it is not an installable dsh plugin — skipped install.`), 'stderr')
+    taskDone(label, 1)
+    return { ok: false, code: null, error: t('该仓库没有任何可安装的 dsh 插件包。', 'This repo has no installable dsh plugin package.') }
+  }
+
+  taskLine(label, t(`[download] 已就绪: ${pkgDir} → 安装到 profile "${cfg.profile}"`, `[download] Ready: ${pkgDir} → installing into profile "${cfg.profile}"`))
   taskDone(label, 0)
-  return install(cfg.profile, target)
+  return install(cfg.profile, pkgDir)
 }

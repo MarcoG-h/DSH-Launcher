@@ -38,9 +38,19 @@ export function setDshActive(next: boolean, reload?: boolean): void {
   active = next
   if (next && (!loaded || reload) && win) {
     loaded = true
-    void ensure().loadURL(`http://127.0.0.1:${getConfig().port}`)
+    void ensureView().loadURL(`http://127.0.0.1:${getConfig().port}`)
   }
   relayout()
+}
+
+/**
+ * Create the DSH view if it does not exist yet, and return its webContents.
+ * Exported so the floating orb can ensure this view is already a child of the
+ * window before it adds itself — child views stack in addition order, so the
+ * orb (added later) is always drawn on top of the DSH view.
+ */
+export function ensureView(): WebContents {
+  return ensure().webContents
 }
 
 /** Keep the view flush against the sidebar after it expands/collapses. */
@@ -49,14 +59,14 @@ export function setDshSidebarWidth(width: number): void {
   relayout()
 }
 
-function ensure(): WebContents {
+function ensure(): WebContentsView {
   if (!view && win) {
     view = new WebContentsView({
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
     })
     win.contentView.addChildView(view)
   }
-  return view!.webContents
+  return view!
 }
 
 function relayout(): void {

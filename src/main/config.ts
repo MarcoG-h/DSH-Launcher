@@ -52,7 +52,11 @@ function defaults(): LauncherConfig {
     startupTimeoutMs: 90000,
     apiPresets: DEFAULT_API_PRESETS.map((p) => ({ ...p })),
     activeApiPresetId: 'deepseek-official',
-    language: systemLang
+    language: systemLang,
+    closeToTray: true,
+    floatingWhale: false,
+    marketPageSize: 30,
+    githubToken: ''
   }
 }
 

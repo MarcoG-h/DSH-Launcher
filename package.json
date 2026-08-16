@@ -1,6 +1,6 @@
 {
   "name": "dsh-launcher",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "DeepSeek Harness desktop launcher — start/restart, live logs, plugin management (cc-switch style)",
   "main": "./out/main/index.js",
   "author": "MarcoG-h",
@@ -23,10 +23,17 @@
     "files": [
       "out/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "resources"
+      }
+    ],
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,

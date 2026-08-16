@@ -14,6 +14,7 @@ import type {
   MarketReadme,
   MarketRepo,
   PluginListResult,
+  PluginSubPackage,
   TaskEvent
 } from '../../../shared/types'
 
@@ -33,6 +34,7 @@ export type {
   MarketReadme,
   MarketRepo,
   PluginListResult,
+  PluginSubPackage,
   TaskEvent
 }
 

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { JSX } from 'react'
 import { api, type InstalledPlugin, type LocalPlugin, type MarketPage, type MarketRepo } from '../lib/api'
+import { useHarness } from '../hooks/useHarness'
 import { useI18n } from '../i18n'
 import { RefreshIcon } from '../lib/icons'
 import { MarketModal } from './MarketModal'
 
-const PER_PAGE = 30
-// GitHub search caps results at 1000 repos (page 34 at per_page=30).
-const MAX_PAGE = 34
+// GitHub search caps results at 1000 repos; both constants derive from the
+// per-page setting in 系统管理 (Settings → System).
+function clampPageSize(n: number): number {
+  return Math.min(50, Math.max(10, Number.isFinite(n) ? Math.floor(n) : 30))
+}
 
 function fmtDate(iso: string, lang: 'zh' | 'en'): string {
   const d = new Date(iso)
@@ -25,19 +28,23 @@ interface Props {
 /** Plugin market tab: GitHub repos tagged `dsh-plugin`, sorted by stars, paged. */
 export function MarketTab({ installed, local, onRefresh }: Props): JSX.Element {
   const { t, lang } = useI18n()
+  const { config } = useHarness()
+  const perPage = clampPageSize(config?.marketPageSize ?? 30)
+  const maxPage = Math.max(1, Math.floor(1000 / perPage))
   const [page, setPage] = useState(1)
   const [data, setData] = useState<MarketPage | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
   const [selected, setSelected] = useState<MarketRepo | null>(null)
 
   const load = useCallback(
-    async (p: number): Promise<void> => {
+    async (p: number, q: string): Promise<void> => {
       setLoading(true)
       setError(null)
       try {
-        const r = await api.searchMarket(p)
+        const r = await api.searchMarket(p, q)
         if (r.ok) {
           setData(r)
         } else {
@@ -52,9 +59,19 @@ export function MarketTab({ installed, local, onRefresh }: Props): JSX.Element {
     [t]
   )
 
+  // Search runs server-side (GitHub search API) so a keyword spans the whole
+  // topic — debounce keystrokes, then reload from page 1.
   useEffect(() => {
-    void load(1)
-  }, [load])
+    const h = setTimeout(() => {
+      setDebouncedQuery(query)
+      setPage(1)
+    }, 300)
+    return () => clearTimeout(h)
+  }, [query])
+
+  useEffect(() => {
+    void load(1, debouncedQuery)
+  }, [load, debouncedQuery])
 
   // Local install detection: GitHub clones land in pluginDir under the repo name,
   // npm-installed plugins are keyed by package name — match either.
@@ -71,22 +88,11 @@ export function MarketTab({ installed, local, onRefresh }: Props): JSX.Element {
 
   const isInstalled = (repo: MarketRepo): boolean => installedKeys.has(repo.repo) || installedKeys.has(repo.fullName)
 
-  const q = query.trim().toLowerCase()
-  const filtered = useMemo(() => {
-    const repos = data?.repos ?? []
-    if (!q) return repos
-    return repos.filter(
-      (r) =>
-        r.fullName.toLowerCase().includes(q) ||
-        (r.description ?? '').toLowerCase().includes(q) ||
-        r.topics.some((tp) => tp.toLowerCase().includes(q))
-    )
-  }, [data, q])
-
-  const totalPages = Math.min(MAX_PAGE, Math.max(1, Math.ceil((data?.totalCount ?? 0) / PER_PAGE)))
+  const repos = data?.repos ?? []
+  const totalPages = Math.min(maxPage, Math.max(1, Math.ceil((data?.totalCount ?? 0) / perPage)))
   const goto = (p: number): void => {
     setPage(p)
-    void load(p)
+    void load(p, debouncedQuery)
   }
 
   return (
@@ -102,7 +108,7 @@ export function MarketTab({ installed, local, onRefresh }: Props): JSX.Element {
         <span className="text-[11.5px]" style={{ color: 'var(--muted)' }}>
           {t('market.total', { count: data?.totalCount ?? 0 })}
         </span>
-        <button className="btn btn-ghost btn-sm shrink-0" disabled={loading} onClick={() => void load(page)}>
+        <button className="btn btn-ghost btn-sm shrink-0" disabled={loading} onClick={() => void load(page, debouncedQuery)}>
           <RefreshIcon /> {t('market.refresh')}
         </button>
       </div>
@@ -115,7 +121,7 @@ export function MarketTab({ installed, local, onRefresh }: Props): JSX.Element {
           <span>
             {t('market.error')} {error}
           </span>
-          <button className="btn btn-ghost btn-sm shrink-0" onClick={() => void load(page)}>
+          <button className="btn btn-ghost btn-sm shrink-0" onClick={() => void load(page, debouncedQuery)}>
             {t('market.refresh')}
           </button>
         </div>
@@ -125,13 +131,13 @@ export function MarketTab({ installed, local, onRefresh }: Props): JSX.Element {
         <div className="py-12 text-center text-[13px]" style={{ color: 'var(--muted)' }}>
           {t('market.loading')}
         </div>
-      ) : filtered.length === 0 ? (
+      ) : repos.length === 0 ? (
         <div className="card p-5 text-[13px]" style={{ color: 'var(--muted)' }}>
           {t('market.empty')}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((r) => {
+          {repos.map((r) => {
             const installedFlag = isInstalled(r)
             return (
               <div

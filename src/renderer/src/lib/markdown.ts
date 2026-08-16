@@ -16,26 +16,53 @@ export interface ReadmeBase {
   blob: string
 }
 
+/** GitHub-style heading slug, so `#my-section` anchor links resolve in-page. */
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[ -⁯⸀-⹿\\'!"#$%&()*+,./:;<=>?@[\]^`{|}~]/g, '')
+    .replace(/\s+/g, '-')
+}
+
 export function renderMarkdown(md: string, base?: ReadmeBase): string {
   const html = marked.parse(md, { async: false }) as string
   const clean = DOMPurify.sanitize(html)
-
-  if (!base) return clean
+  const doc = new DOMParser().parseFromString(clean, 'text/html')
+  const raw = base?.raw ?? ''
+  const blob = base?.blob ?? ''
 
   // Resolve relative URLs inside the sanitized DOM so in-repo screenshots and
   // links actually work (marked leaves them as bare paths).
-  const doc = new DOMParser().parseFromString(clean, 'text/html')
   doc.querySelectorAll('img').forEach((img) => {
     const src = img.getAttribute('src')
     if (src && !/^(https?:|data:|blob:|#)/i.test(src)) {
-      img.setAttribute('src', base.raw + src.replace(/^\.\//, ''))
+      img.setAttribute('src', raw + src.replace(/^\.\//, ''))
     }
   })
   doc.querySelectorAll('a').forEach((a) => {
     const href = a.getAttribute('href')
     if (href && !/^(https?:|mailto:|#)/i.test(href)) {
-      a.setAttribute('href', base.blob + href.replace(/^\.\//, ''))
+      a.setAttribute('href', blob + href.replace(/^\.\//, ''))
     }
+    // Every click is routed through the modal's own handler (confirm dialog +
+    // system browser / in-page scroll), so never let the browser open a new
+    // window or the launcher window navigate.
+    a.removeAttribute('target')
+    a.removeAttribute('rel')
   })
+
+  // Give headings GitHub-style ids so `#foo` anchors scroll in-page instead of
+  // falling back to the confirm-dialog / window-navigation path.
+  const used = new Map<string, number>()
+  doc.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((h) => {
+    if (h.getAttribute('id')) return
+    const base = slugify(h.textContent ?? '')
+    if (!base) return
+    const n = used.get(base) ?? 0
+    used.set(base, n + 1)
+    h.setAttribute('id', n === 0 ? base : `${base}-${n}`)
+  })
+
   return doc.body.innerHTML
 }
