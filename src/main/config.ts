@@ -54,6 +54,8 @@ function defaults(): LauncherConfig {
     activeApiPresetId: 'deepseek-official',
     language: systemLang,
     closeToTray: true,
+    splashEnabled: true,
+    autoStartOnLaunch: false,
     floatingWhale: false,
     marketPageSize: 30,
     githubToken: ''

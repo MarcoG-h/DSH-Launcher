@@ -9,6 +9,14 @@ export function bindWindow(w: BrowserWindow): void {
   win = w
 }
 
+/** Subscribe an in-process listener to every broadcast event; returns an unsubscribe. */
+export function onEvent(cb: (e: LauncherEvent) => void): () => void {
+  listeners.add(cb)
+  return () => {
+    listeners.delete(cb)
+  }
+}
+
 /** Broadcast to in-process listeners and the renderer (if attached). */
 export function broadcast(e: LauncherEvent): void {
   for (const l of listeners) l(e)

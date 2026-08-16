@@ -55,6 +55,10 @@ export interface LauncherConfig {
   language: 'zh' | 'en'
   /** Hide to the system tray on window close instead of quitting. */
   closeToTray: boolean
+  /** Startup splash: play the whale-lightbulb animation before showing the window. Default on. */
+  splashEnabled: boolean
+  /** Launch: auto-start dsh on app start so it boots while the splash plays. Default off; flips on automatically after a successful deploy. */
+  autoStartOnLaunch: boolean
   /** DSH view: replace the collapsed whale rail with a draggable floating orb. Default off. */
   floatingWhale: boolean
   /** How many plugin-market entries are fetched per page (10–50). */

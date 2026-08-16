@@ -4,6 +4,7 @@ import { HarnessProvider, useHarness } from './hooks/useHarness'
 import { I18nProvider, useI18n } from './i18n'
 import { api } from './lib/api'
 import { Sidebar, type PageId } from './components/Sidebar'
+import { SplashOverlay } from './components/SplashOverlay'
 import { TopBar } from './components/TopBar'
 import { Dashboard } from './pages/Dashboard'
 import { Plugins } from './pages/Plugins'
@@ -22,13 +23,17 @@ function Shell(): JSX.Element {
   }
   const [view, setView] = useState<PageId | 'dsh'>('dashboard')
   const [collapsed, setCollapsed] = useState(false)
+  // The startup splash plays inside this window; the DSH view (a native child,
+  // drawn above the DOM) stays hidden until the splash has finished.
+  const [splashDone, setSplashDone] = useState(false)
 
   // The embedded DSH view may only open once the port actually reports ready —
   // not while 'starting'/'stopping' (a connection would just fail).
   const status = state?.status ?? 'stopped'
   const ready = status === 'running' || status === 'external'
   const inDsh = view === 'dsh'
-  const showDsh = ready && inDsh
+  const splashActive = (config?.splashEnabled ?? true) && !splashDone
+  const showDsh = ready && inDsh && !splashActive
   const prevReady = useRef<boolean | null>(null)
   const freshReady = useRef(false)
 
@@ -101,6 +106,7 @@ function Shell(): JSX.Element {
 
   return (
     <div className="flex h-full">
+      {(config?.splashEnabled ?? true) && !splashDone && <SplashOverlay onDone={() => setSplashDone(true)} />}
       {/* Always mounted (width animates to 0 in orb mode) so the rail's content
           can't pop in/out; overflow-hidden on the rail clips it at width 0. */}
       <Sidebar

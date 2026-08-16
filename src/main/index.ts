@@ -4,10 +4,11 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bindWindow } from './bus'
 import { getConfig } from './config'
+import * as dshStatus from './dsh-status'
 import { registerDshView } from './dshview'
 import { registerIpc } from './ipc'
 import { registerOrb } from './orb'
-import { stopSync } from './harness'
+import { start as startDsh, stopSync } from './harness'
 import { ensureShortcuts } from './shortcuts'
 import { preloadPath } from './preload'
 import { hideToTray, initTray, markQuitting, showLauncher } from './tray'
@@ -102,7 +103,16 @@ if (!gotTheLock) {
       }
     }
     registerIpc()
+    dshStatus.init()
     ensureShortcuts()
+    // autoStartOnLaunch (Settings): start dsh as soon as the app boots, before
+    // the window is created, so it boots in parallel with the startup splash —
+    // by the time the animation ends, dsh is usually already ready.
+    if (getConfig().autoStartOnLaunch) {
+      void startDsh().then((r) => {
+        if (!r.ok) console.error('[launcher] auto-start failed:', r.error)
+      })
+    }
     const win = createWindow()
     initTray(win)
     app.on('activate', () => {

@@ -4,6 +4,7 @@ import { api, type ApiPreset, type LauncherConfig } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
 import { useI18n } from '../i18n'
 import { TaskConsole } from '../components/TaskConsole'
+import { Toggle } from '../components/Toggle'
 import { DownloadIcon, RefreshIcon, PowerIcon, PlusIcon, TrashIcon } from '../lib/icons'
 import whaleIcon from '../assets/whale.png'
 import rueIcon from '../assets/rue.png'
@@ -119,6 +120,11 @@ export function Settings(): JSX.Element {
       const r = await api.installRuntime()
       await refresh()
       setRtDone(r.ok)
+      if (r.ok) {
+        // Deployment complete ⇒ from now on auto-start dsh on launch (the box
+        // reflects the new value after config propagates back into the form).
+        await saveConfig({ autoStartOnLaunch: true })
+      }
     } finally {
       setRtBusy(null)
     }
@@ -408,22 +414,22 @@ export function Settings(): JSX.Element {
             />
             <p className="mt-1 text-[11px]" style={{ color: 'var(--muted)' }}>{t('settings.githubTokenHint')}</p>
           </div>
-          <label className="flex items-center gap-2 text-[13px] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={form.closeToTray ?? true}
-              onChange={(e) => set('closeToTray')(e.target.checked)}
-            />
-            {t('settings.closeToTray')}
-          </label>
-          <label className="flex items-center gap-2 text-[13px] cursor-pointer">
-            <input
-              type="checkbox"
-              checked={form.floatingWhale ?? false}
-              onChange={(e) => set('floatingWhale')(e.target.checked)}
-            />
-            {t('settings.floatingWhale')}
-          </label>
+          <div className="flex items-center justify-between gap-3 text-[13px]">
+            <span>{t('settings.closeToTray')}</span>
+            <Toggle checked={form.closeToTray ?? true} onChange={(v) => set('closeToTray')(v)} />
+          </div>
+          <div className="flex items-center justify-between gap-3 text-[13px]">
+            <span>{t('settings.floatingWhale')}</span>
+            <Toggle checked={form.floatingWhale ?? false} onChange={(v) => set('floatingWhale')(v)} />
+          </div>
+          <div className="flex items-center justify-between gap-3 text-[13px]">
+            <span>{t('settings.splashEnabled')}</span>
+            <Toggle checked={form.splashEnabled ?? true} onChange={(v) => set('splashEnabled')(v)} />
+          </div>
+          <div className="flex items-center justify-between gap-3 text-[13px]">
+            <span>{t('settings.autoStartOnLaunch')}</span>
+            <Toggle checked={form.autoStartOnLaunch ?? false} onChange={(v) => set('autoStartOnLaunch')(v)} />
+          </div>
 
           {/* paths & launch */}
           <div className="space-y-4 border-t pt-4" style={{ borderColor: 'var(--border)' }}>

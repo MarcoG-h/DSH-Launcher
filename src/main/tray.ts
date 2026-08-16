@@ -1,8 +1,11 @@
 // System tray: keeps the launcher alive in the background when the window is
 // closed with closeToTray enabled, and provides Show/Quit actions. The icon is
 // a generated PNG embedded as base64 so no resource path exists to break in
-// dev vs packaged builds.
+// dev vs packaged builds. The icon always carries a coloured corner dot
+// (green/yellow/red) mirroring dsh's runtime state — the dot is drawn into the
+// bitmap in memory, so there is still no resource file to go missing.
 import { app, BrowserWindow, Menu, nativeImage, Tray } from 'electron'
+import * as dshStatus from './dsh-status'
 import { getConfig } from './config'
 import { t } from './i18n'
 
@@ -16,6 +19,54 @@ let tray: Tray | null = null
 let win: BrowserWindow | null = null
 let quitting = false
 let notified = false
+
+// Status-dot colour per light (RGBA). The dot sits in the bottom-right corner.
+// null = no dot (light 'off').
+const DOT_COLORS: Record<Exclude<dshStatus.DshLight, 'off'>, [number, number, number]> = {
+  green: [0x34, 0xd3, 0x64],
+  yellow: [0xf2, 0xb5, 0x0c],
+  red: [0xef, 0x44, 0x44]
+}
+/** Cached status icons so setImage doesn't redraw every poll. */
+const iconCache = new Map<string, Electron.NativeImage>()
+
+/** Base icon + an optional coloured dot, rendered into the bitmap in memory. */
+function makeTrayIcon(light: dshStatus.DshLight): Electron.NativeImage {
+  const key = `light:${light}`
+  const cached = iconCache.get(key)
+  if (cached) return cached
+  const base = nativeImage.createFromDataURL(`data:image/png;base64,${ICON_BASE64}`)
+  const color = light === 'off' ? null : DOT_COLORS[light]
+  if (!color) {
+    iconCache.set(key, base)
+    return base
+  }
+  const size = base.getSize()
+  const bmp = base.toBitmap()
+  const stride = size.width * 4
+  // ~10px dot, ~1px inset from the bottom-right corner.
+  const cx = size.width - 6
+  const cy = size.height - 6
+  const r = 5
+  for (let y = 0; y < size.height; y++) {
+    for (let x = 0; x < size.width; x++) {
+      const dx = x - cx
+      const dy = y - cy
+      if (dx * dx + dy * dy <= r * r) {
+        // toBitmap/createFromBitmap on Windows are BGRA — write B,G,R so the
+        // colours aren't swapped (a yellow dot was rendering blue before this).
+        const i = y * stride + x * 4
+        bmp[i] = color[2]     // B
+        bmp[i + 1] = color[1] // G
+        bmp[i + 2] = color[0] // R
+        bmp[i + 3] = 255      // A
+      }
+    }
+  }
+  const icon = nativeImage.createFromBitmap(bmp, { width: size.width, height: size.height })
+  iconCache.set(key, icon)
+  return icon
+}
 
 export function isQuitting(): boolean {
   return quitting
@@ -38,12 +89,55 @@ export function showLauncher(): void {
   win.focus()
 }
 
-export function initTray(window: BrowserWindow): void {
-  win = window
-  const icon = nativeImage.createFromDataURL(`data:image/png;base64,${ICON_BASE64}`)
-  tray = new Tray(icon)
-  tray.setToolTip('DSH Launcher')
-  const menu = Menu.buildFromTemplate([
+// Status text per light (zh, en) — used for the hover tooltip and the status
+// line at the top of the right-click menu.
+const STATUS_TEXT: Record<dshStatus.DshLight, [string, string]> = {
+  off: ['DSH 未运行', 'DSH not running'],
+  green: ['DSH 运行中', 'DSH running'],
+  yellow: ['DSH 等待处理', 'DSH awaiting input'],
+  red: ['DSH 报错', 'DSH error']
+}
+
+/** Human-readable status in the current UI language. */
+function statusLine(light: dshStatus.DshLight): string {
+  const [zh, en] = STATUS_TEXT[light]
+  return t(zh, en)
+}
+
+/** Tray hover tooltip, e.g. "DSH Launcher — DSH 运行中". */
+function tooltip(light: dshStatus.DshLight): string {
+  const [zh, en] = STATUS_TEXT[light]
+  return t(`DSH Launcher — ${zh}`, `DSH Launcher — ${en}`)
+}
+
+/** Small filled dot used as the icon of the menu's status line. */
+function dotIcon(light: dshStatus.DshLight): Electron.NativeImage {
+  const color = light === 'off' ? [0x9a, 0x9a, 0x9a] : DOT_COLORS[light]
+  const size = 16
+  const buf = Buffer.alloc(size * size * 4)
+  const r = 5.5
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = x - (size / 2 - 0.5)
+      const dy = y - (size / 2 - 0.5)
+      if (dx * dx + dy * dy <= r * r) {
+        // BGRA byte order (see makeTrayIcon).
+        const i = (y * size + x) * 4
+        buf[i] = color[2]     // B
+        buf[i + 1] = color[1] // G
+        buf[i + 2] = color[0] // R
+        buf[i + 3] = 255
+      }
+    }
+  }
+  return nativeImage.createFromBitmap(buf, { width: size, height: size })
+}
+
+/** Right-click menu; the first line is the live dsh status (disabled). */
+function buildMenu(light: dshStatus.DshLight): Electron.Menu {
+  return Menu.buildFromTemplate([
+    { label: statusLine(light), enabled: false, icon: dotIcon(light) },
+    { type: 'separator' },
     { label: t('显示主界面', 'Show Launcher'), click: showLauncher },
     { type: 'separator' },
     {
@@ -54,6 +148,26 @@ export function initTray(window: BrowserWindow): void {
       }
     }
   ])
+}
+
+export function initTray(window: BrowserWindow): void {
+  win = window
+  tray = new Tray(makeTrayIcon('off'))
+  // Status light: mirror dsh's runtime state in the tray icon (always on).
+  // The light also drives the hover tooltip and the menu's status line, so all
+  // three are refreshed together whenever the light changes. onDshLight fires
+  // immediately with the current state, so this also seeds the initial values.
+  let menu = buildMenu('off')
+  const off = dshStatus.onDshLight((light) => {
+    if (!tray) return
+    tray.setImage(makeTrayIcon(light))
+    tray.setToolTip(tooltip(light))
+    menu = buildMenu(light)
+  })
+  win.on('closed', () => {
+    off()
+    win = null
+  })
   // Left-click (and double-click) brings the window back. On Windows a context
   // menu attached via setContextMenu swallows the left click, so the menu is
   // popped up manually on right-click only.
