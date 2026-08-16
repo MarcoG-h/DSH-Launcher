@@ -36,7 +36,7 @@ DSH Launcher 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harn
 ## 快速部署教程
 
 目标机器什么都不需要准备！跟着下面三步即可用上 dsh。
-[教程视频](https://www.bilibili.com/video/BV1BMbR64EoQ/?vd_source=ed1422074bd9beff1e11e3fba3c0fff8)
+[BiliBili教程视频](https://www.bilibili.com/video/BV1BMbR64EoQ/?vd_source=ed1422074bd9beff1e11e3fba3c0fff8)
 
 ### 第 1 步:打开「设置」
 
