@@ -88,7 +88,7 @@ export function Settings(): JSX.Element {
   }
   const addPreset = (): void => {
     const id = `custom-${Date.now()}`
-    setPresets((ps) => [...ps, { id, name: t('settings.newPresetName'), baseUrl: '', balanceUrl: '', apiKey: '' }])
+    setPresets((ps) => [...ps, { id, name: t('settings.newPresetName'), baseUrl: '', balanceUrl: '', apiKey: '', local: false }])
     setSaved(false)
   }
 
@@ -303,7 +303,7 @@ export function Settings(): JSX.Element {
                   }}
                 >
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <input
                         className="input mono"
                         value={p.name}
@@ -316,6 +316,18 @@ export function Settings(): JSX.Element {
                           {t('settings.current')}
                         </span>
                       )}
+                      <label
+                        className="flex items-center gap-1.5 text-[12px] cursor-pointer"
+                        style={{ color: p.local ? 'var(--accent)' : 'var(--muted)' }}
+                        title={t('settings.localModelHint')}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!!p.local}
+                          onChange={(e) => updatePreset(p.id, { local: e.target.checked })}
+                        />
+                        {t('settings.localModel')}
+                      </label>
                     </div>
                     <div className="flex gap-2">
                       {!isActive && (
@@ -333,34 +345,38 @@ export function Settings(): JSX.Element {
                     </div>
                   </div>
                   <div className="grid sm:grid-cols-2 gap-2.5">
-                    <div>
+                    <div className={p.local ? 'sm:col-span-2' : ''}>
                       <label className="label">{t('settings.baseUrl')}</label>
                       <input
                         className="input mono"
                         value={p.baseUrl}
-                        placeholder="https://api.deepseek.com"
+                        placeholder={p.local ? 'http://localhost:11434/v1' : 'https://api.deepseek.com'}
                         onChange={(e) => updatePreset(p.id, { baseUrl: e.target.value })}
                       />
                     </div>
-                    <div>
-                      <label className="label">{t('settings.balanceUrl')}</label>
-                      <input
-                        className="input mono"
-                        value={p.balanceUrl}
-                        placeholder="https://api.deepseek.com/user/balance"
-                        onChange={(e) => updatePreset(p.id, { balanceUrl: e.target.value })}
-                      />
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="label">{t('settings.apiKey')}</label>
-                      <input
-                        className="input mono"
-                        type="password"
-                        value={p.apiKey ?? ''}
-                        placeholder="sk-…"
-                        onChange={(e) => updatePreset(p.id, { apiKey: e.target.value })}
-                      />
-                    </div>
+                    {!p.local && (
+                      <div>
+                        <label className="label">{t('settings.balanceUrl')}</label>
+                        <input
+                          className="input mono"
+                          value={p.balanceUrl}
+                          placeholder="https://api.deepseek.com/user/balance"
+                          onChange={(e) => updatePreset(p.id, { balanceUrl: e.target.value })}
+                        />
+                      </div>
+                    )}
+                    {!p.local && (
+                      <div className="sm:col-span-2">
+                        <label className="label">{t('settings.apiKey')}</label>
+                        <input
+                          className="input mono"
+                          type="password"
+                          value={p.apiKey ?? ''}
+                          placeholder="sk-…"
+                          onChange={(e) => updatePreset(p.id, { apiKey: e.target.value })}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               )

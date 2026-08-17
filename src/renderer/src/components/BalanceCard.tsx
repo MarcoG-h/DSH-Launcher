@@ -13,6 +13,7 @@ export function BalanceCard(): JSX.Element {
   const [provider, setProvider] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [localModel, setLocalModel] = useState(false)
 
   const presets = config?.apiPresets ?? []
   const activeId = config?.activeApiPresetId
@@ -21,12 +22,19 @@ export function BalanceCard(): JSX.Element {
     if (!silent) setLoading(true)
     const r = await api.getBalance()
     setProvider(r.provider ?? null)
-    if (r.ok && r.data) {
-      setData(r.data)
+    if (r.local) {
+      setLocalModel(true)
+      setData(null)
       setError(null)
     } else {
-      setError(r.error ?? t('balance.fetchFailed'))
-      setData(null)
+      setLocalModel(false)
+      if (r.ok && r.data) {
+        setData(r.data)
+        setError(null)
+      } else {
+        setError(r.error ?? t('balance.fetchFailed'))
+        setData(null)
+      }
     }
     setLoading(false)
   }, [])
@@ -84,7 +92,11 @@ export function BalanceCard(): JSX.Element {
         </div>
       </div>
 
-      {error ? (
+      {localModel ? (
+        <p className="mt-2.5 text-[12.5px]" style={{ color: 'var(--accent)' }}>
+          {t('balance.localModel')}
+        </p>
+      ) : error ? (
         <p className="mt-2.5 text-[12.5px]" style={{ color: 'var(--warn)' }}>
           {error}
         </p>

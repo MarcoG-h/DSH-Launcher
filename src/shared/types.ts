@@ -79,6 +79,8 @@ export interface ApiPreset {
   balanceUrl: string
   /** Preset-specific API key for the balance widget; takes precedence over the global key. */
   apiKey?: string
+  /** Local / self-hosted model (Ollama, LM Studio, vLLM…) — no API key or balance check. */
+  local?: boolean
 }
 
 export interface InstalledPlugin {
@@ -164,6 +166,8 @@ export interface BalanceResult {
   error?: string
   /** Display name of the provider the balance came from (for the widget title). */
   provider?: string
+  /** True when the active preset is a local / self-hosted model — no balance query applies. */
+  local?: boolean
 }
 
 /** A dsh plugin discovered on GitHub (topic:dsh-plugin), mapped from the search API response. */

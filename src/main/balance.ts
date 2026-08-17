@@ -24,6 +24,12 @@ function readDshApiKey(): string | null {
 export async function getBalance(): Promise<BalanceResult> {
   const cfg = getConfig()
   const preset = getActiveApiPreset()
+  // Local / self-hosted models (Ollama, LM Studio, vLLM…) need no API key and
+  // expose no balance endpoint — skip the query entirely instead of surfacing a
+  // misleading "API key is valid" / "no key" result.
+  if (preset.local) {
+    return { ok: true, local: true, provider: preset.name }
+  }
   const url =
     (preset.balanceUrl ?? '').trim() ||
     (preset.baseUrl ? `${preset.baseUrl.replace(/\/+$/, '')}/user/balance` : '')

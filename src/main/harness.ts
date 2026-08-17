@@ -101,15 +101,27 @@ export async function start(): Promise<{ ok: boolean; error?: string }> {
     return { ok: false, error: t(`harness 仓库不存在: ${plan.cwd}`, `harness repo not found: ${plan.cwd}`) }
   }
 
-  // Refuse to race an existing listener (e.g. a dsh instance started outside the launcher).
+  // A listener on our port means either an external dsh the user started, or a
+  // leftover dsh orphaned by a previous launcher run that didn't shut down
+  // cleanly (taskkill from a killed/crashed launcher can miss it). The latter is
+  // the "works the first time, hangs the second" failure: the stale process still
+  // holds the port but its server is dead, so the embedded view just spins. When
+  // the listener is recognisably a dsh process, reclaim the port instead of
+  // erroring; anything else is a genuine conflict we must not touch.
   if (await portInUse(cfg.port)) {
     const pid = await findListeningPid(cfg.port)
-    return {
-      ok: false,
-      error: t(
-        `端口 ${cfg.port} 已被占用 (pid=${pid ?? '?'}) — 可能有另一个 dsh 实例正在运行,请先停止它再启动。`,
-        `Port ${cfg.port} is already in use (pid=${pid ?? '?'}) — another dsh instance may be running; stop it first.`
-      )
+    if (pid && (await isLeftoverDsh(pid))) {
+      pushLine('stderr', t(`[launcher] 检测到残留的 dsh 进程 (pid=${pid}),清理后重新启动…`, `[launcher] Detected a leftover dsh process (pid=${pid}); cleaning up and restarting…`))
+      await killPid(pid)
+      await delay(1500)
+    } else {
+      return {
+        ok: false,
+        error: t(
+          `端口 ${cfg.port} 已被占用 (pid=${pid ?? '?'}) — 可能有另一个 dsh 实例正在运行,请先停止它再启动。`,
+          `Port ${cfg.port} is already in use (pid=${pid ?? '?'}) — another dsh instance may be running; stop it first.`
+        )
+      }
     }
   }
 
@@ -135,10 +147,13 @@ export async function start(): Promise<{ ok: boolean; error?: string }> {
   const apiEnv: NodeJS.ProcessEnv = {}
   if (preset.baseUrl) apiEnv.DEEPSEEK_BASE_URL = preset.baseUrl
   if (preset.apiKey?.trim()) apiEnv.DEEPSEEK_API_KEY = preset.apiKey.trim()
+  else if (preset.local) apiEnv.DEEPSEEK_API_KEY = 'local'
   if (apiEnv.DEEPSEEK_BASE_URL) {
-    pushLine('stderr', t(`[launcher] API 厂商: ${preset.name} (${preset.baseUrl})`, `[launcher] API provider: ${preset.name} (${preset.baseUrl})`))
+    pushLine('stderr', t(`[launcher] API 厂商: ${preset.name} (${preset.baseUrl})${preset.local ? ' [本地模型]' : ''}`, `[launcher] API provider: ${preset.name} (${preset.baseUrl})${preset.local ? ' [local model]' : ''}`))
   }
-  if (apiEnv.DEEPSEEK_API_KEY) {
+  if (preset.local) {
+    pushLine('stderr', t('[launcher] 本地部署模型 — 跳过 API Key 校验(注入占位 key)', '[launcher] Local model — skipping API key validation (placeholder key injected)'))
+  } else if (apiEnv.DEEPSEEK_API_KEY) {
     pushLine('stderr', t(`[launcher] 已注入该厂商的 API Key(${preset.name}) — 模型调用不再需要去 DSH 界面填 key`, `[launcher] Injected the provider's API key (${preset.name}) — no need to fill it in the DSH UI`))
   } else if (apiEnv.DEEPSEEK_BASE_URL) {
     pushLine('stderr', t('[launcher] 该预设未填 API Key — 将使用 ~/.dsh/.credentials.yaml 中已存的 key,若无则模型调用会报 MISSING_CREDENTIAL', '[launcher] This preset has no API Key — falling back to ~/.dsh/.credentials.yaml; without it model calls fail with MISSING_CREDENTIAL'))
@@ -267,6 +282,51 @@ function findListeningPid(port: number): Promise<number | null> {
       resolve(m ? Number(m[1]) : null)
     })
   })
+}
+
+/** Read a process's full command line (Windows PowerShell). */
+function processCommandLine(pid: number): Promise<string> {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      resolve('')
+      return
+    }
+    const proc = spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`], { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] })
+    let out = ''
+    proc.stdout?.on('data', (c: Buffer) => {
+      out += c.toString('utf8')
+    })
+    proc.on('error', () => resolve(''))
+    proc.on('close', () => resolve(out.trim()))
+  })
+}
+
+/** True when the process at `pid` is a dsh server (portable/source node running the dsh bin). */
+async function isLeftoverDsh(pid: number): Promise<boolean> {
+  const cmdline = await processCommandLine(pid)
+  return /deepseek-ai|deepseek-harness|bin\.js/i.test(cmdline)
+}
+
+/** Force-kill a process tree by pid. */
+function killPid(pid: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (process.platform === 'win32') {
+      const k = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true, stdio: 'ignore' })
+      k.on('close', () => resolve())
+      k.on('error', () => resolve())
+    } else {
+      try {
+        process.kill(pid, 'SIGKILL')
+      } catch {
+        /* already gone */
+      }
+      resolve()
+    }
+  })
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**

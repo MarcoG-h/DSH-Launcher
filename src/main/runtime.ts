@@ -12,6 +12,16 @@ import { t } from './i18n'
 import { runAsync, taskDone, taskLine, taskProgress } from './task'
 import type { CmdResult } from '../shared/types'
 
+// Timeouts for the portable-install steps so a slow or hung child (tar / npm on
+// a slow disk, or a non-C: drive) can never leave the deploy spinner stuck
+// forever — the watchdog only prints "still running", it doesn't abort.
+const EXTRACT_TIMEOUT_MS = 5 * 60_000
+const NPM_TIMEOUT_MS = 20 * 60_000
+
+// npm/pnpm installs inside the deploy must use the same mirror — otherwise a
+// China-based machine crawls on the default registry and the deploy looks hung.
+const REGISTRY = 'https://registry.npmmirror.com'
+
 // --- layout helpers (always resolve from the live config) ---
 
 export function nodeDir(): string {
@@ -165,8 +175,16 @@ function progressLine(label: string): (received: number, total: number | null) =
 /**
  * One-click portable environment install:
  *  1. download + unpack portable Node (npmmirror) into runtimeRoot/node
- *  2. npm install @deepseek-ai/dsh@<dshVersion> into runtimeRoot/dsh (full built-in bundle closure)
- *  3. npm install -g pnpm (for `dsh plugin` inside the bundled CLI)
+ *  2. npm install -g pnpm (needed for `dsh plugin` and for step 3)
+ *  3. pnpm add @deepseek-ai/dsh@<dshVersion> into runtimeRoot/dsh (full built-in bundle closure).
+ *     pnpm is used instead of a bare npm install because npm without a lockfile drifts on
+ *     the pi-ai/typebox transitive pins (the user-visible `Cannot find module typebox` boot
+ *     failure) and tries to compile koffi from source (needs cmake / VS build tools), while
+ *     pnpm resolves the same versions the official repo lockfile pins and pulls the
+ *     @koromix/koffi platform + node-pty prebuilt packages — no compiler needed.
+ *     (--config.strictDepBuilds=false makes pnpm treat un-approved install scripts as a
+ *     warning instead of failing the whole install; those scripts are no-ops here because
+ *     the native deps arrive as prebuilt platform packages.)
  *  4. auto-configure the launcher to bundled mode
  */
 export async function installRuntime(): Promise<CmdResult> {
@@ -184,9 +202,6 @@ export async function installRuntime(): Promise<CmdResult> {
   const zip = join(root, `node-v${ver}-win-x64.zip`)
   const inner = join(stage, `node-v${ver}-win-x64`)
   const url = `https://registry.npmmirror.com/-/binary/node/v${ver}/node-v${ver}-win-x64.zip`
-  // npm installs inside the deploy must use the same mirror — otherwise a
-  // China-based machine crawls on the default registry and the deploy looks hung.
-  const REGISTRY = 'https://registry.npmmirror.com'
   const npmOpts = ['--no-fund', '--no-audit', '--engine-strict=false', `--registry=${REGISTRY}`]
 
   mkdirSync(root, { recursive: true })
@@ -233,7 +248,7 @@ export async function installRuntime(): Promise<CmdResult> {
     taskProgress(label, 0.42, t('解压 Node', 'Extracting Node'))
     mkdirSync(stage, { recursive: true })
     // Windows ships bsdtar, which extracts zip archives.
-    const x = await runAsync('tar', ['-xf', zip, '-C', stage], root, label, process.platform === 'win32')
+    const x = await runAsync('tar', ['-xf', zip, '-C', stage], root, label, process.platform === 'win32', undefined, EXTRACT_TIMEOUT_MS)
     if (!x.ok || !existsSync(inner)) {
       taskLine(label, t('tar 解压失败,改用 PowerShell Expand-Archive…', 'tar extraction failed, falling back to PowerShell Expand-Archive…'), 'stderr')
       const ps = await runAsync(
@@ -241,7 +256,9 @@ export async function installRuntime(): Promise<CmdResult> {
         ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath '${zip}' -DestinationPath '${stage}'`],
         root,
         label,
-        true
+        true,
+        undefined,
+        EXTRACT_TIMEOUT_MS
       )
       if (!ps.ok || !existsSync(inner)) {
         taskDone(label, 1)
@@ -255,7 +272,23 @@ export async function installRuntime(): Promise<CmdResult> {
     taskLine(label, t(`[runtime] ✔ Node 就绪: ${nodeExe()}`, `[runtime] ✔ Node ready: ${nodeExe()}`))
   }
 
-  // 2. bundled dsh (full built-in plugin closure lives in its node_modules)
+  // 2. pnpm for `dsh plugin` and for the dsh install in step 3.
+  const npm = join(dir, 'npm.cmd')
+  const pnpm = join(dir, 'pnpm.cmd')
+  taskProgress(label, 0.45, t('安装 pnpm', 'Installing pnpm'))
+  if (!existsSync(pnpm)) {
+    taskLine(label, t('[runtime] 安装 pnpm(供 dsh 安装与 plugin 使用)…', '[runtime] Installing pnpm (for dsh install & plugin)…'))
+    const p = await runAsync(npm, ['install', '-g', 'pnpm', ...npmOpts], dir, label, process.platform === 'win32', undefined, NPM_TIMEOUT_MS)
+    if (!p.ok) {
+      taskDone(label, p.code ?? 1)
+      return p
+    }
+  }
+
+  // 3. bundled dsh (full built-in plugin closure lives in its node_modules).
+  //    Installed with pnpm so transitive pins (pi-ai/typebox) match the official
+  //    lockfile and native deps (koffi, node-pty) come as prebuilt platform
+  //    packages — a bare npm install drifts here and needs a compiler for koffi.
   const dshDir = dshInstallDir()
   mkdirSync(dshDir, { recursive: true })
   const pkg = join(dshDir, 'package.json')
@@ -263,9 +296,8 @@ export async function installRuntime(): Promise<CmdResult> {
     writeFileSync(pkg, JSON.stringify({ name: 'dsh-runtime', private: true, version: '0.0.0' }, null, 2) + '\n', 'utf8')
   }
   taskLine(label, t(`[runtime] 安装 @deepseek-ai/dsh@${dshVer}(含全部内置插件)…`, `[runtime] Installing @deepseek-ai/dsh@${dshVer} (with all built-in plugins)…`))
-  taskProgress(label, 0.45, t(`安装 @deepseek-ai/dsh@${dshVer}(体积较大,请稍候)`, `Installing @deepseek-ai/dsh@${dshVer} (large download, please wait)`))
-  const npm = join(dir, 'npm.cmd')
-  const ins = await runAsync(npm, ['install', `@deepseek-ai/dsh@${dshVer}`, ...npmOpts], dshDir, label, process.platform === 'win32')
+  taskProgress(label, 0.5, t(`安装 @deepseek-ai/dsh@${dshVer}(体积较大,请稍候)`, `Installing @deepseek-ai/dsh@${dshVer} (large download, please wait)`))
+  const ins = await runAsync(pnpm, ['add', `@deepseek-ai/dsh@${dshVer}`, `--registry=${REGISTRY}`, '--config.strictDepBuilds=false'], dshDir, label, process.platform === 'win32', undefined, NPM_TIMEOUT_MS)
   if (!ins.ok) {
     taskDone(label, ins.code ?? 1)
     return ins
@@ -273,17 +305,6 @@ export async function installRuntime(): Promise<CmdResult> {
   if (!existsSync(dshBin())) {
     taskDone(label, 1)
     return { ok: false, code: 1, error: t('安装后未找到 dsh 入口(lib/bin.js)', 'dsh entry not found after install (lib/bin.js)') }
-  }
-
-  // 3. pnpm for `dsh plugin`
-  taskProgress(label, 0.86, t('安装 pnpm', 'Installing pnpm'))
-  if (!existsSync(join(dir, 'pnpm.cmd'))) {
-    taskLine(label, t('[runtime] 安装 pnpm(供 dsh plugin 使用)…', '[runtime] Installing pnpm (for dsh plugin)…'))
-    const pnpm = await runAsync(npm, ['install', '-g', 'pnpm', ...npmOpts], dir, label, process.platform === 'win32')
-    if (!pnpm.ok) {
-      taskDone(label, pnpm.code ?? 1)
-      return pnpm
-    }
   }
 
   // 4. auto-configure paths so the launcher switches to bundled mode.
@@ -319,9 +340,14 @@ export async function updateRuntime(): Promise<CmdResult> {
     return { ok: false, code: 1, error: t('运行环境未安装', 'Runtime not installed') }
   }
   const dshVer = cfg.dshVersion || '0.1.0-rc.6'
-  const npm = join(nodeDir(), 'npm.cmd')
+  const pnpm = join(nodeDir(), 'pnpm.cmd')
+  if (!existsSync(pnpm)) {
+    taskLine(label, t('[runtime] 未找到 pnpm,请先重新「一键安装运行环境」。', '[runtime] pnpm not found — please re-run "Install runtime" first.'), 'stderr')
+    taskDone(label, 1)
+    return { ok: false, code: 1, error: t('运行环境缺少 pnpm,请重新一键安装', 'Runtime is missing pnpm — re-run one-click install') }
+  }
   taskLine(label, t(`[runtime] 升级 @deepseek-ai/dsh@${dshVer}(不触碰 ~/.dsh 的第三方插件)…`, `[runtime] Upgrading @deepseek-ai/dsh@${dshVer} (third-party plugins in ~/.dsh are untouched)…`))
-  const r = await runAsync(npm, ['install', `@deepseek-ai/dsh@${dshVer}`, '--no-fund', '--no-audit'], dshInstallDir(), label, process.platform === 'win32')
+  const r = await runAsync(pnpm, ['add', `@deepseek-ai/dsh@${dshVer}`, `--registry=${REGISTRY}`, '--config.strictDepBuilds=false'], dshInstallDir(), label, process.platform === 'win32')
   if (!r.ok) return r
   taskLine(label, t('[runtime] ✔ 内置 dsh 已升级', '[runtime] ✔ Built-in dsh upgraded'))
   taskDone(label, 0)
