@@ -105,6 +105,8 @@ DSH Web 直接内嵌在客户端窗口里,启动 / 重启 / 插件市场 / 余�
 
 如果您有任何想要的新功能，欢迎来找我交流！QQ交流群：957159489
 
+![QQ 交流群](screenshots/交流群.jpg)
+
 ---
 
 ## 系统要求
@@ -170,12 +172,6 @@ dsh-launcher/
 
 - [@MarcoG-h](https://github.com/MarcoG-h) — 项目发起者与维护者
 - [@baihejiangnan](https://github.com/baihejiangnan) — 提供了"更好的右键"插件
-
-## 交流群
-
-欢迎加入 QQ 交流群,扫码进群:
-
-![QQ 交流群](screenshots/交流群.jpg)
 
 ## License
 
