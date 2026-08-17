@@ -12,8 +12,7 @@
 <a href="https://github.com/MarcoG-h/DSH-Launcher/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
 </p>
 
-<p>把官方 <a href="https://github.com/deepseek-ai/deepseek-harness">deepseek-ai/deepseek-harness</a>(<code>@deepseek-ai/dsh</code>)
-封装为<strong>开箱即用的 Windows 桌面启动器</strong>:无需安装 Node.js、无需源码,一键部署便携运行环境;
+<p>Windows 桌面启动器</strong>:无需安装 Node.js、无需源码,一键部署便携运行环境;
 DSH Web 直接内嵌在客户端窗口里,启动 / 重启 / 插件市场 / 余额 / 多厂商 API 切换,一步到位。</p>
 
 <table>
