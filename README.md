@@ -171,6 +171,12 @@ dsh-launcher/
 - [@MarcoG-h](https://github.com/MarcoG-h) — 项目发起者与维护者
 - [@baihejiangnan](https://github.com/baihejiangnan) — 提供了"更好的右键"插件
 
+## 交流群
+
+欢迎加入 QQ 交流群,扫码进群:
+
+![QQ 交流群](screenshots/交流群.jpg)
+
 ## License
 
 MIT。基于 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness)(MIT)。
