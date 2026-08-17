@@ -39,8 +39,7 @@ DSH Web 直接内嵌在客户端窗口里,启动 / 重启 / 插件市场 / 余�
 | **桌面体验** | 系统托盘常驻 + 托盘三态状态灯 + 悬浮球 + 开屏动画 |
 | **扩展性** | 几乎支持一切适配DSHweb的插件，兼容全系插件生态 |
 
-> 内核零改动:DSH Launcher 直接运行官方 dsh,完整保留「一切皆插件」架构与全部官方能力,
-> 与 CLI 共享 `DSH_HOME` 配置,已有会话 / API Key 直接生效。
+> 内核零改动: 内部原生DSH Launcher，一切皆插件！
 
 ---
 
@@ -56,8 +55,6 @@ DSH Web 直接内嵌在客户端窗口里,启动 / 重启 / 插件市场 / 余�
 
 📺 快速上手视频教程:[BiliBili](https://www.bilibili.com/video/BV1BMbR64EoQ/?vd_source=ed1422074bd9beff1e11e3fba3c0fff8)
 
-> 安装版数据目录在 `%APPDATA%\dsh-launcher`;DSH 会话数据沿用 `~\.dsh`(`DSH_HOME`)。
-> 想强制指定 DSH 配置目录?启动前设置环境变量 `DSH_HOME` 即可(与 dsh CLI 行为一致)。
 
 **首次使用**:
 
