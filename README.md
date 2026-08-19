@@ -19,7 +19,7 @@ DSH Web 直接内嵌在客户端窗口里。</p>
 每个环境自由搭配不同的插件组合;配合推荐整合包一键装机与带分类筛选的插件市场,
 把插件生态的灵活性变成普通用户也能随手使用的能力。</p>
 
-感谢社区作者 [@baihejiangnan](https://github.com/baihejiangnan)的倾力相助
+特别感谢社区作者 [@baihejiangnan](https://github.com/baihejiangnan)的倾力相助
 
 <table>
 <tr>
