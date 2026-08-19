@@ -130,7 +130,7 @@ DSH Web 直接内嵌在客户端窗口里。</p>
 
 如果您有任何想要的新功能,欢迎来找我交流!QQ交流群:957159489
 
-![QQ 交流群](screenshots/group-qr.png)
+[QQ 交流群](screenshots/group-qr.png)
 
 ---
 
