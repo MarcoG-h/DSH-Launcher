@@ -1,71 +1,186 @@
-# DSH Launcher
+<div align="center">
 
-> The most convenient DSH launcher and third-party plugin manager: one-click installation, a native client UI, and quick start & restart.
+<p><a href="https://github.com/MarcoG-h/DSH-Launcher/blob/main/README.md">中文</a> | <a href="#dsh-launcher">English</a></p>
 
-DSH Launcher is a desktop launcher for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), built with Electron + React + Tailwind. It brings "install the runtime, start, restart, and manage third-party plugins" together into one local client.
+<h1>DSH Launcher V3 — 鲸罗棋布</h1>
 
-[中文 README](README.md)
+<p>
+<a href="https://github.com/MarcoG-h/DSH-Launcher"><img src="https://img.shields.io/github/stars/MarcoG-h/DSH-Launcher?style=flat&label=%E2%AD%90&color=08C" alt="GitHub stars"></a>
+<a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/Windows-10%2F11-4493F8?style=flat" alt="Windows"></a>
+<a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/Desktop-App-47848F?style=flat" alt="Desktop App"></a>
+<a href="https://github.com/MarcoG-h/DSH-Launcher/releases/tag/v3.0.0"><img src="https://img.shields.io/badge/v3.0.0-Release-2EA44F?style=flat" alt="v3.0.0"></a>
+<a href="https://github.com/MarcoG-h/DSH-Launcher/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
+</p>
 
-## Screenshots
+<p>No Node.js installation or source code needed — one-click deployment of a portable runtime;
+the DSH Web UI is embedded directly inside the native client window.</p>
 
-![Dashboard](screenshots/dashboard.png)
+<p><strong>Evolved from a "launcher" into a "multi-instance management hub"</strong> — run multiple
+independent DSH environments side by side in a single client, each freely mixing its own set of
+plugins; together with one-click recommended bundles and a categorized plugin marketplace,
+the flexibility of the plugin ecosystem becomes something every user can reach.</p>
 
-## Features
+<p>Special thanks to community author <a href="https://github.com/baihejiangnan">@baihejiangnan</a> for the great help</p>
 
-- **One-click installation / quick offline deployment** — no Node.js or source code required; deploy a portable Node + dsh runtime in one click and start using dsh directly, fully offline.
-- **Native client UI** — everything happens inside the desktop app; the DSH web UI can be embedded in-app (with working IME input), no browser round-trips.
-- **Quick start & restart** — start / stop / restart dsh with one click; auto-enters the DSH view once it's ready.
-- **Third-party plugin management** — browse local plugins, install / remove / enable / disable, one-click download from GitHub. Installed plugins are archived locally.
-- **Balance widget** — check your account balance right on the dashboard.
-- **Visual startup logs** — if startup fails (e.g., missing dependencies), the reason is shown in the UI with a one-click fix.
+<table>
+<tr>
+<td align="center"><a href="screenshots/main-ui.png"><img src="screenshots/main-ui.png" alt="DSH Launcher main UI"></a><br><sub>Main UI</sub></td>
+<td align="center"><a href="screenshots/multi-instances.png"><img src="screenshots/multi-instances.png" alt="Multi-instance management"></a><br><sub>Multi-instance management</sub></td>
+</tr>
+</table>
 
-## Modes
+</div>
 
-| Mode | Description |
+---
+
+## **V3** What's New
+
+| Highlight | Description |
 | --- | --- |
-| Bundled (recommended) | "Quick offline deployment" installs a portable Node + dsh in one click; no prerequisites on the target machine |
-| Source | Requires local Node.js + pnpm; for debugging / modifying the Harness source |
+| **Parallel instances** | Run multiple DSH instances side by side, each freely configured with different plugin combinations |
+| **Built-in bundles** | Ready-optimized plugin packs for beginners — get started right away |
+| **Plugin marketplace update** | Category tags to find plugins fast; three built-in plugin sources |
+| **Local plugin management** | Fully redesigned for multi-instance; avoids duplicate plugin downloads |
+| **One-click deployment** | Built-in portable environment, fully offline, no prerequisites |
+| **Native client UI** | DSH Web embedded in a native window; smoother multi-window experience |
+| **Polished desktop experience** | System tray status light + floating ball + splash animation |
 
-## Quick Deployment Tutorial
+> Zero kernel changes: DSH Launcher runs the official dsh, preserving the "everything is a plugin" architecture and all official capabilities.
+> The data directory (`DSH_HOME`) is fully compatible with the CLI: by default it shares your existing directory, so existing sessions / API keys keep working;
+> you can also create a brand-new isolated directory per instance, keeping sessions, plugins, and credentials fully separated from the rest.
 
-The target machine needs nothing to be prepared! Follow the three steps below to get dsh running.
+---
 
-### Step 1: Open "Settings"
+## Download & Install
 
-After launching DSH Launcher, click **"Settings"** in the left sidebar.
+### GitHub Releases (recommended)
 
-![Step 1: click "Settings"](screenshots/quickstart-1-dashboard.png)
+| File | Description | Size |
+| --- | --- | --- |
+| [Installer exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v3.0.0/DSH.Launcher.Setup.3.0.0.exe) | NSIS installer; creates desktop / Start menu shortcuts automatically | ~100 MB |
 
-### Step 2: One-click offline deployment
+More versions on the [Releases page](https://github.com/MarcoG-h/DSH-Launcher/releases).
 
-In the "Quick offline deployment" panel, click the **"Quick offline deployment"** button and wait for the portable Node + dsh runtime to be installed automatically (fully offline). Once deployed, the app automatically switches to bundled mode and fills in the paths.
+📺 Quick-start video tutorial: [BiliBili](https://www.bilibili.com/video/BV1BMbR64EoQ/?vd_source=ed1422074bd9beff1e11e3fba3c0fff8)
 
-![Step 2: click "Quick offline deployment"](screenshots/quickstart-2-settings-deploy.png)
+> The installer stores its data under `%APPDATA%\dsh-launcher`; DSH session data defaults to `~\.dsh` (`DSH_HOME`).
+> Want to force a different DSH config directory? Set the `DSH_HOME` environment variable before launching (same behavior as the dsh CLI).
 
-### Step 3: Start dsh
 
-Go back to **"Dashboard"**, click **"Start"**. Once it's ready, the app automatically enters the DSH view and you can start using it.
+**First use**:
 
-![Step 3: click "Start"](screenshots/quickstart-3-start.png)
+1. Install and launch DSH Launcher — a splash animation plays on startup.
+2. Go to "Settings → Quick offline deployment" and click **"Quick offline deployment"** — a portable Node + pnpm + dsh runtime is installed automatically, fully offline; the app switches to bundled mode and fills in the paths when done.
+3. Back in "Console", click **"Start"** — once ready, the app enters the DSH UI automatically and you can start using it.
+4. If you haven't configured an API key yet, enter it in the DSH UI.
 
-Need an API key? Visit the [DeepSeek open platform](https://platform.deepseek.com).
+**Upgrading**:
 
-## Development & Building
+- Install the new build over the old one — data is not lost; the installer closes running old processes automatically.
+- "Update built-in dsh" only upgrades the bundled companion plugins; it never overwrites third-party plugins in `~\.dsh` or manual `cordis.patch.yml` entries.
+
+---
+
+## **V3** Features
+
+### Multi-instance system
+
+- Run multiple isolated DSH instances side by side in one client; each instance has its own config and port
+- Create one for "coding", "chatting", "testing" — switching instances switches the whole plugin environment
+- New instance modes (see: [DSH_HOME isolation](https://github.com/baihejiangnan/dsh-home-isolation-guide)):
+        
+        "Shared" — reuse the existing data directory (shared sessions, presets, settings, etc.)
+        
+        "Isolated" — create a brand-new data directory (sessions, plugins, everything fully separated)
+
+- Each instance can be controlled independently from the client
+- Instances in "Shared" mode cannot work in the same session simultaneously
+
+![Multi-instance management](screenshots/multi-instances.png)
+
+### Recommended bundles
+
+- No need to pick plugins yourself — two curated bundles are built in; one-click download, automatic instance creation, automatic plugin installation
+- Progress bars while downloading; each plugin inside a bundle is downloaded independently and isolated from the others
+- Third-party plugins often have compatibility issues with each other — the bundles include patches to fix them (see: [plugin packs](https://github.com/baihejiangnan/dsh-plugin-pack-web))
+
+![Recommended bundles](screenshots/bundle.png)
+
+### New plugin marketplace
+
+- **Category tags**: find plugins by category fast; cards show their matching categories and clicking one filters the list
+- **Multiple plugin sources**: GitHub, [Deepseek1024](https://deepseek1024.com/), [dshfind](https://dshfind.com/zh) — diversified download channels (Chinese plugin descriptions)
+- Inline README preview; one-click install and archive into the local plugin library
+
+![Plugin marketplace](screenshots/market.png)
+
+### New local plugin management
+
+- **Matrix view**: see at a glance which plugin is enabled in which instance; one-click management
+
+![Plugin matrix](screenshots/matrix.png)
+
+### Other features
+
+- Balance widget
+- Console: start / restart / stop
+- System tray resident + tray status light, fullscreen immersive + floating ball, splash animation, close-to-tray
+
+![Balance & logs](screenshots/console.png)
+
+Want a new feature? Come talk to us! QQ group: 957159489
+
+![QQ group](screenshots/group-qr.png)
+
+---
+
+## System requirements
+
+- Windows 10/11 (x64)
+- Bundled mode needs no pre-installed Node.js or any other runtime
+- 4GB+ RAM (recommended)
+
+---
+
+## Building from source
 
 ```bash
-pnpm install
-pnpm dev        # dev mode
-pnpm build      # build
+pnpm install        # first install downloads Electron; configure electron_mirror in .npmrc if your network is slow
+pnpm dev            # dev mode (HMR)
+pnpm build          # build main / preload / renderer to out/
+pnpm dist           # electron-vite build + electron-builder --win → release/
 ```
 
-## Privacy
+> Restricted network: Electron mirror `$env:ELECTRON_MIRROR='https://npmmirror.com/mirrors/electron/'`.
 
-- The DeepSeek API key is only read locally in the main process from `~/.dsh/.credentials.yaml`. It is never written to logs or uploaded anywhere.
+## Architecture
+
+```
+┌──────────────────────────────────────────────────┐
+│  Electron shell (main process)                   │
+│  · single-instance lock / window / tray /        │
+│    floating ball / shortcut maintenance          │
+│  · multi-instance harness lifecycle              │
+│    (start / stop / restart / timeout guard)      │
+│  · bundle installation / plugin marketplace      │
+│    (category filter) / balance                   │
+└──────────────┬───────────────────────────────────┘
+               │  spawn node dsh/lib/bin.js <profile>
+               │  (DSH_HOME=<shared or isolated data dir>)
+               ▼
+        bundled node.exe + @deepseek-ai/dsh
+        prints "dsh web: http://127.0.0.1:<port>"
+               │  readiness probe (HTTP 200) then load
+               ▼
+        WebContentsView embeds DSH UI
+        (single window, localhost loopback only)
+```
+
+## Contributing
+
+- [@MarcoG-h](https://github.com/MarcoG-h) — project initiator & maintainer
+- [@baihejiangnan](https://github.com/baihejiangnan) — recommended bundle contributor & maintainer
 
 ## License
 
-MIT
-
-## Acknowledgements
-
-Thanks to [baihejiangnan](https://github.com/baihejiangnan) for the "Better Context Menu" plugin ([dsh-session-context-menu](https://github.com/baihejiangnan/dsh-session-context-menu)), which brings a native-style context menu to the launcher-packaged DSH and is featured as a recommended plugin in this launcher. More developers are welcome to join the DSH plugin ecosystem and refine the desktop-shell experience together.
+MIT. Based on [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) (MIT).
