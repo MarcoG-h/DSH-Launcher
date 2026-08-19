@@ -12,8 +12,9 @@
 <a href="https://github.com/MarcoG-h/DSH-Launcher/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
 </p>
 
-<p>Windows 桌面启动器</strong>:无需安装 Node.js、无需源码,一键部署便携运行环境;
-DSH Web 直接内嵌在客户端窗口里,启动 / 重启 / 插件市场 / 余额 / 多厂商 API 切换,一步到位。</p>
+<p>把官方 <a href="https://github.com/deepseek-ai/deepseek-harness">deepseek-ai/deepseek-harness</a>(<code>@deepseek-ai/dsh</code>)
+封装为<strong>开箱即用的 Windows 桌面启动器</strong>:无需安装 Node.js、无需源码,一键部署便携运行环境;
+DSH Web 直接内嵌在客户端窗口里,启动 / 重启 / 插件市场 / 余额,一步到位。</p>
 
 <table>
 <tr>
@@ -33,13 +34,12 @@ DSH Web 直接内嵌在客户端窗口里,启动 / 重启 / 插件市场 / 余�
 | **免装 Node 一键部署** | 内置独立 Node + npm + pnpm + dsh,无需准备,全程一键 |
 | **客户端内嵌界面** | DSH Web 直接内嵌在原生窗口里,不跳转浏览器 |
 | **一键启动 / 停止 / 重启** | 快捷进行常用操作 |
-| **快捷 API 切换** | 任意厂商预设一键切换，API Key 启动时自动注入 |
 | **插件市场 & 插件管理** | GitHub 关键词搜索一键安装,自动识别仓库子包,插件自动归档存库 |
 | **余额小部件** | 主界面实时查看账户余额 |
 | **桌面体验** | 系统托盘常驻 + 托盘三态状态灯 + 悬浮球 + 开屏动画 |
-| **扩展性** | 几乎支持一切适配DSHweb的插件，兼容全系插件生态 |
 
-> 内核零改动: 内部原生DSH Launcher，一切皆插件！
+> 内核零改动:DSH Launcher 直接运行官方 dsh,完整保留「一切皆插件」架构与全部官方能力,
+> 与 CLI 共享 `DSH_HOME` 配置,已有会话 / API Key 直接生效。
 
 ---
 
@@ -55,13 +55,15 @@ DSH Web 直接内嵌在客户端窗口里,启动 / 重启 / 插件市场 / 余�
 
 📺 快速上手视频教程:[BiliBili](https://www.bilibili.com/video/BV1BMbR64EoQ/?vd_source=ed1422074bd9beff1e11e3fba3c0fff8)
 
+> 安装版数据目录在 `%APPDATA%\dsh-launcher`;DSH 会话数据沿用 `~\.dsh`(`DSH_HOME`)。
+> 想强制指定 DSH 配置目录?启动前设置环境变量 `DSH_HOME` 即可(与 dsh CLI 行为一致)。
 
 **首次使用**:
 
 1. 双击安装,安装完成后启动 DSH Launcher,显示开屏动画。
 2. 进入「设置 → 快速离线部署」点击**「快速离线部署」**,自动安装便携 Node + pnpm + dsh 运行环境(全程离线可用),部署完成自动切换为内置模式并回填路径。
 3. 回到「控制台」点击**「启动」**,就绪后自动进入 DSH 界面,即可开始使用。
-4. 如尚未配置 API Key,在「设置 → API」添加厂商预设或填写密钥即可(与命令行 dsh 完全一致)。
+4. 如尚未配置 API Key,在 DSH 界面填写即可(与命令行 dsh 完全一致)。
 
 ### 升级部署
 
@@ -92,7 +94,6 @@ DSH Web 直接内嵌在客户端窗口里,启动 / 重启 / 插件市场 / 余�
 
 ### 配置与效率
 
-- **快捷 API 切换**
 - **余额小部件**
 - **第三方插件市场&插件管理**
 - **实时日志与故障可视化**
@@ -102,7 +103,7 @@ DSH Web 直接内嵌在客户端窗口里,启动 / 重启 / 插件市场 / 余�
 
 如果您有任何想要的新功能，欢迎来找我交流！QQ交流群：957159489
 
-[QQ 交流群二维码](screenshots/交流群.jpg)
+![QQ 交流群](screenshots/交流群.jpg)
 
 ---
 
@@ -111,11 +112,6 @@ DSH Web 直接内嵌在客户端窗口里,启动 / 重启 / 插件市场 / 余�
 - Windows 10/11(x64)
 - 内置版无需预装 Node.js 或任何其他运行时
 - 4GB+ 内存(推荐)
-
-## 扩展性
-
-- 为了不限制用户的自定义程度，本启动器没有预装或内置任何插件功能
-- 用户可以根据自己的喜好安装一切适配DSHweb端的插件，一切皆插件！
 
 ---
 

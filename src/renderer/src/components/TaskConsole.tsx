@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { TaskLog } from '../lib/api'
 import { formatDuration, useI18n } from '../i18n'
+import { CopyButton } from './CopyButton'
 
 function lineColor(stream: string, line: string): string {
   if (/error|failed|ELIFECYCLE|Cannot find|ERR_MODULE/i.test(line)) return 'var(--err)'
@@ -68,9 +69,10 @@ export function TaskConsole({ task }: { task: TaskLog }): React.JSX.Element {
               ? t('task.doneExit')
               : t('task.failedExit', { code: task.code ?? '?' })}
         </span>
+        <CopyButton text={task.lines.map((l) => l.line).join('\n')} title={t('common.copyAll')} />
       </div>
       <ProgressBar progress={task.progress} running={task.running} />
-      <div ref={ref} className="log-console overflow-auto max-h-[220px] p-3">
+      <div ref={ref} className="log-console select-text overflow-auto max-h-[220px] p-3">
         {task.lines.length === 0 ? (
           <div className="mono text-[12px]" style={{ color: '#5c6370' }}>
             {task.running ? t('task.waiting') : t('task.noOutput')}

@@ -9,6 +9,11 @@ export function bindWindow(w: BrowserWindow): void {
   win = w
 }
 
+/** The launcher window (parent for popup child windows), or null before it exists. */
+export function getWindow(): BrowserWindow | null {
+  return win
+}
+
 /** Subscribe an in-process listener to every broadcast event; returns an unsubscribe. */
 export function onEvent(cb: (e: LauncherEvent) => void): () => void {
   listeners.add(cb)

@@ -8,7 +8,8 @@ import * as dshStatus from './dsh-status'
 import { registerDshView } from './dshview'
 import { registerIpc } from './ipc'
 import { registerOrb } from './orb'
-import { start as startDsh, stopSync } from './harness'
+import { startAllAutoStart, stopAllSync } from './harness'
+import * as plugins from './plugins'
 import { ensureShortcuts } from './shortcuts'
 import { preloadPath } from './preload'
 import { hideToTray, initTray, markQuitting, showLauncher } from './tray'
@@ -105,13 +106,12 @@ if (!gotTheLock) {
     registerIpc()
     dshStatus.init()
     ensureShortcuts()
-    // autoStartOnLaunch (Settings): start dsh as soon as the app boots, before
-    // the window is created, so it boots in parallel with the startup splash —
-    // by the time the animation ends, dsh is usually already ready.
+    // autoStartOnLaunch (Settings): start every instance flagged autoStart as
+    // soon as the app boots, before the window is created, so they boot in
+    // parallel with the startup splash — by the time the animation ends, dsh is
+    // usually already ready.
     if (getConfig().autoStartOnLaunch) {
-      void startDsh().then((r) => {
-        if (!r.ok) console.error('[launcher] auto-start failed:', r.error)
-      })
+      startAllAutoStart()
     }
     const win = createWindow()
     initTray(win)
@@ -128,6 +128,6 @@ if (!gotTheLock) {
 
   app.on('before-quit', () => {
     markQuitting()
-    if (getConfig().stopOnQuit) stopSync()
+    if (getConfig().stopOnQuit) stopAllSync()
   })
 }

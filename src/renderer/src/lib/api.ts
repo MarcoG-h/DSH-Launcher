@@ -1,9 +1,9 @@
 import type {
-  ApiPreset,
   BalanceData,
   BalanceResult,
   BootstrapState,
   CmdResult,
+  DshInstance,
   HarnessState,
   LauncherConfig,
   LauncherEvent,
@@ -13,17 +13,23 @@ import type {
   MarketPage,
   MarketReadme,
   MarketRepo,
+  NewInstanceInput,
+  PluginCellStatus,
   PluginListResult,
+  PluginMatrixColumn,
+  PluginMatrixResult,
+  PluginMatrixRow,
+  PluginMeta,
   PluginSubPackage,
   TaskEvent
 } from '../../../shared/types'
 
 export type {
-  ApiPreset,
   BalanceData,
   BalanceResult,
   BootstrapState,
   CmdResult,
+  DshInstance,
   HarnessState,
   LauncherConfig,
   LauncherEvent,
@@ -33,7 +39,13 @@ export type {
   MarketPage,
   MarketReadme,
   MarketRepo,
+  NewInstanceInput,
+  PluginCellStatus,
   PluginListResult,
+  PluginMatrixColumn,
+  PluginMatrixResult,
+  PluginMatrixRow,
+  PluginMeta,
   PluginSubPackage,
   TaskEvent
 }

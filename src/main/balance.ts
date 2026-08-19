@@ -1,19 +1,27 @@
-// DeepSeek balance widget — reads the API key (config override or dsh's own
-// ~/.dsh/.credentials.yaml) and queries the balance endpoint via the main
-// process's net.fetch (avoids CORS from the renderer). The key is only read in
-// the main process, never persisted here or logged.
+// DeepSeek balance widget — reads the API key from dsh's own
+// ~/.dsh/.credentials.yaml (DSH stores it there) and queries the DeepSeek
+// balance endpoint via the main process's net.fetch (avoids CORS from the
+// renderer). The key is only read in the main process, never persisted here
+// or logged.
 
 import { net } from 'electron'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { getActiveApiPreset, getConfig } from './config'
+import { getConfig } from './config'
+import { getActiveInstance, instanceDshHome } from './instances'
 import { t } from './i18n'
 import type { BalanceResult } from '../shared/types'
 
-/** Extract `DEEPSEEK_API_KEY: <value>` from the simple key: value credential file. */
+const DEEPSEEK_BALANCE_URL = 'https://api.deepseek.com/user/balance'
+
+/**
+ * Extract `DEEPSEEK_API_KEY: <value>` from the simple key: value credential file.
+ * 按活动实例的 home 读 key:独立 home 复制了共享 key,独立实例读自己的;
+ * 共享实例仍读 ~/.dsh。
+ */
 function readDshApiKey(): string | null {
   try {
-    const raw = readFileSync(join(getConfig().dshHome, '.credentials.yaml'), 'utf8')
+    const raw = readFileSync(join(instanceDshHome(getActiveInstance()), '.credentials.yaml'), 'utf8')
     const m = raw.match(/^\s*DEEPSEEK_API_KEY\s*[:=]\s*["']?([^"'\r\n]+)["']?\s*$/m)
     return m ? m[1].trim() : null
   } catch {
@@ -22,37 +30,17 @@ function readDshApiKey(): string | null {
 }
 
 export async function getBalance(): Promise<BalanceResult> {
-  const cfg = getConfig()
-  const preset = getActiveApiPreset()
-  // Local / self-hosted models (Ollama, LM Studio, vLLM…) need no API key and
-  // expose no balance endpoint — skip the query entirely instead of surfacing a
-  // misleading "API key is valid" / "no key" result.
-  if (preset.local) {
-    return { ok: true, local: true, provider: preset.name }
-  }
-  const url =
-    (preset.balanceUrl ?? '').trim() ||
-    (preset.baseUrl ? `${preset.baseUrl.replace(/\/+$/, '')}/user/balance` : '')
-  if (!url) {
-    return {
-      ok: false,
-      provider: preset.name,
-      error: t('该厂商未配置余额接口 — 可在 设置 → API 切换 里填写 balanceUrl。', 'This provider has no balance URL configured — set one under Settings → API switch.')
-    }
-  }
-  // Key priority: preset key → global override → dsh credentials file.
-  const key = (preset.apiKey ?? '').trim() || (cfg.deepseekApiKey ?? '').trim() || readDshApiKey()
+  const key = readDshApiKey()
   if (!key) {
     return {
       ok: false,
-      provider: preset.name,
-      error: t('未找到 API Key — 请在该预设或设置中填写,或确认 ~/.dsh/.credentials.yaml 已配置。', 'No API Key found — set it in this preset or in Settings, or check ~/.dsh/.credentials.yaml.')
+      error: t('未找到 API Key — 请在 DSH 界面填写,或确认 ~/.dsh/.credentials.yaml 已配置。', 'No API Key found — fill it in the DSH UI, or check ~/.dsh/.credentials.yaml.')
     }
   }
   try {
-    const res = await net.fetch(url, { headers: { Authorization: `Bearer ${key}` } })
+    const res = await net.fetch(DEEPSEEK_BALANCE_URL, { headers: { Authorization: `Bearer ${key}` } })
     if (!res.ok) {
-      return { ok: false, provider: preset.name, error: t(`余额接口返回 HTTP ${res.status}`, `Balance endpoint returned HTTP ${res.status}`) }
+      return { ok: false, error: t(`余额接口返回 HTTP ${res.status}`, `Balance endpoint returned HTTP ${res.status}`) }
     }
     const json = (await res.json()) as {
       is_available?: boolean
@@ -65,11 +53,10 @@ export async function getBalance(): Promise<BalanceResult> {
     }
     const info = json.balance_infos?.[0]
     if (!info) {
-      return { ok: false, provider: preset.name, error: t('余额响应缺少 balance_infos', 'Balance response is missing balance_infos') }
+      return { ok: false, error: t('余额响应缺少 balance_infos', 'Balance response is missing balance_infos') }
     }
     return {
       ok: true,
-      provider: preset.name,
       data: {
         currency: info.currency ?? 'CNY',
         total_balance: String(info.total_balance ?? ''),
@@ -79,6 +66,6 @@ export async function getBalance(): Promise<BalanceResult> {
       }
     }
   } catch (err) {
-    return { ok: false, provider: preset.name, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }

@@ -4,11 +4,14 @@
 import { net } from 'electron'
 import { getConfig } from './config'
 import { t } from './i18n'
-import type { MarketPage, MarketReadme, MarketRepo } from '../shared/types'
+import type { MarketPage, MarketReadme, MarketRepo, MarketSourceId } from '../shared/types'
+import { categoryTopic } from '../shared/market-categories'
+import { search1024 } from './market-1024'
+import { searchDshfind } from './market-dshfind'
 
 const API = 'https://api.github.com'
 
-function perPage(): number {
+export function perPage(): number {
   const n = getConfig().marketPageSize
   return Math.min(50, Math.max(10, Number.isFinite(n) ? Math.floor(n) : 30))
 }
@@ -29,14 +32,37 @@ async function gh(path: string, accept = 'application/vnd.github+json'): Promise
 }
 
 /**
- * Page 1..N of the market, sorted by stars desc. A `query` adds a keyword to
- * the GitHub search so results span the whole topic, not just the current page.
+ * 插件市场入口:按 sourceId 分派到对应源(GitHub topic 搜索 / DSH 1024Store /
+ * dshfind.com)。统一归一化为 MarketRepo,下载与 README 走同一链路。
+ */
+export async function searchMarket(
+  sourceId: MarketSourceId,
+  page: number,
+  query?: string,
+  categoryId?: string,
+  force?: boolean
+): Promise<MarketPage> {
+  if (sourceId === 'dsh1024') return search1024(page, query, categoryId)
+  if (sourceId === 'dshfind') return searchDshfind(page, query, categoryId, force)
+  return searchGithub(page, query, categoryId)
+}
+
+/**
+ * GitHub 源:Page 1..N of the market, sorted by stars desc. A `query` adds a
+ * keyword to the GitHub search so results span the whole topic, not just the
+ * current page. An optional `categoryId` maps to a single `topic:<word>`
+ * qualifier (GitHub's Search API only ANDs — OR/括号 on qualifiers实测无效, so a
+ * category is always one topic word, see shared/market-categories.ts).
  * Unauthenticated GitHub API.
  */
-export async function searchMarket(page: number, query?: string): Promise<MarketPage> {
+async function searchGithub(page: number, query?: string, categoryId?: string): Promise<MarketPage> {
   const p = Math.max(1, Math.floor(Number(page) || 1))
   const kw = String(query ?? '').trim()
-  const q = kw ? `topic:dsh-plugin ${kw}` : 'topic:dsh-plugin'
+  const parts = ['topic:dsh-plugin']
+  if (kw) parts.push(kw)
+  const topic = categoryTopic(categoryId) // 未知 id → 空串 → 静默不过滤
+  if (topic) parts.push(`topic:${topic}`)
+  const q = parts.join(' ')
   const { status, body } = await gh(
     `/search/repositories?q=${encodeURIComponent(q)}&sort=stars&order=desc&per_page=${perPage()}&page=${p}`
   )
@@ -105,12 +131,19 @@ export async function fetchReadme(owner: string, repo: string): Promise<MarketRe
   const o = String(owner)
   const r = String(repo)
   if (!o || !r) return { ok: false, error: t('缺少仓库信息。', 'Missing repository info.') }
-  const res = await net.fetch(`${API}/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/readme`, {
-    headers: {
-      Accept: 'application/vnd.github.raw+json',
-      'User-Agent': ua()
-    }
-  })
+  // net.fetch 会在断网 / DNS 失败 / 超时 / 证书错误时 reject —— 捕获后走错误页,
+  // 不能让 rejection 穿透 IPC 到渲染层。
+  let res: Response
+  try {
+    res = await net.fetch(`${API}/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/readme`, {
+      headers: {
+        Accept: 'application/vnd.github.raw+json',
+        'User-Agent': ua()
+      }
+    })
+  } catch {
+    return { ok: false, error: t('加载 README 失败。', 'Failed to load the README.') }
+  }
   if (res.status === 404) {
     return { ok: false, error: t('该仓库没有 README。', 'This repository has no README.') }
   }

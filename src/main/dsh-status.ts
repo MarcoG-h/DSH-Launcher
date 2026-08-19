@@ -29,6 +29,11 @@ let hostWs: WebSocket | null = null
 let muxWs: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
+// The tray light reflects the *active* instance; every instance's status is
+// tracked so switching instances flips the light without waiting for a new event.
+const states: Record<string, { status: string; port: number }> = {}
+let activeId = getConfig().activeInstanceId || 'default'
+
 const listeners = new Set<(light: DshLight) => void>()
 
 /** Subscribe to the tray-light state. The callback fires immediately and on change. */
@@ -228,20 +233,39 @@ function stop(): void {
   recompute()
 }
 
+/** Reconnect the WS feed to whatever the active instance is now doing. */
+function sync(): void {
+  const st = states[activeId]
+  const status = st?.status
+  const up = status === 'running' || status === 'external'
+  if (up && running && st && st.port !== port) {
+    // The active instance re-picked its port (port 0 each start) — reconnect.
+    stop()
+    running = true
+    port = st.port
+    pending = 0
+    errors = 0
+    void connect()
+  } else if (up && !running) {
+    running = true
+    port = st?.port || getConfig().port || 3080
+    pending = 0
+    errors = 0
+    void connect()
+  } else if (!up && running) {
+    stop()
+  }
+}
+
 /** Wire the light to the harness lifecycle; call once at startup. */
 export function init(): void {
   onEvent((e: LauncherEvent) => {
-    if (e.type !== 'state') return
-    const st = e.state.status
-    const up = st === 'running' || st === 'external'
-    if (up && !running) {
-      running = true
-      port = e.state.port || getConfig().port || 3080
-      pending = 0
-      errors = 0
-      void connect()
-    } else if (!up && running) {
-      stop()
+    if (e.type === 'instances') {
+      activeId = e.activeInstanceId
+      sync()
+    } else if (e.type === 'state') {
+      states[e.state.instanceId] = { status: e.state.status, port: e.state.port }
+      if (e.state.instanceId === activeId) sync()
     }
   })
 }

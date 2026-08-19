@@ -98,7 +98,7 @@ export function bundledEnv(): NodeJS.ProcessEnv {
 
 // --- download helper (node https, follows redirects, reports progress) ---
 
-function downloadFile(url: string, dest: string, onProgress: (received: number, total: number | null) => void): Promise<void> {
+export function downloadFile(url: string, dest: string, onProgress: (received: number, total: number | null) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const file = createWriteStream(dest)
     let req: ReturnType<typeof httpsGet>
@@ -159,7 +159,7 @@ function downloadFile(url: string, dest: string, onProgress: (received: number, 
 }
 
 /** Progress reporter that emits a task line roughly every 2 MB. */
-function progressLine(label: string): (received: number, total: number | null) => void {
+export function progressLine(label: string): (received: number, total: number | null) => void {
   let last = 0
   return (received, total) => {
     if (received - last < 2 * 1024 * 1024) return
@@ -168,6 +168,27 @@ function progressLine(label: string): (received: number, total: number | null) =
     const tot = total ? ` / ${(total / 1024 / 1024).toFixed(1)}MB` : ''
     taskLine(label, t(`[runtime] 下载中 ${mb}MB${tot}…`, `[runtime] Downloading ${mb}MB${tot}…`))
   }
+}
+
+/**
+ * Extract a zip archive into `destDir`. Windows ships bsdtar (`tar -xf`
+ * handles zip); fall back to PowerShell Expand-Archive. Returns false on
+ * failure — the caller decides whether the expected output is present.
+ */
+export async function extractZip(zipPath: string, destDir: string, label: string): Promise<boolean> {
+  const x = await runAsync('tar', ['-xf', zipPath, '-C', destDir], destDir, label, process.platform === 'win32', undefined, EXTRACT_TIMEOUT_MS)
+  if (x.ok) return true
+  taskLine(label, t('[runtime] tar 解压失败,改用 PowerShell Expand-Archive…', '[runtime] tar extraction failed, falling back to PowerShell Expand-Archive…'), 'stderr')
+  const ps = await runAsync(
+    'powershell',
+    ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath '${zipPath}' -DestinationPath '${destDir}'`],
+    destDir,
+    label,
+    true,
+    undefined,
+    EXTRACT_TIMEOUT_MS
+  )
+  return ps.ok
 }
 
 // --- install / update ---
@@ -247,23 +268,10 @@ export async function installRuntime(): Promise<CmdResult> {
     taskLine(label, t(`[runtime] 解压到 ${dir} …`, `[runtime] Extracting to ${dir} …`))
     taskProgress(label, 0.42, t('解压 Node', 'Extracting Node'))
     mkdirSync(stage, { recursive: true })
-    // Windows ships bsdtar, which extracts zip archives.
-    const x = await runAsync('tar', ['-xf', zip, '-C', stage], root, label, process.platform === 'win32', undefined, EXTRACT_TIMEOUT_MS)
-    if (!x.ok || !existsSync(inner)) {
-      taskLine(label, t('tar 解压失败,改用 PowerShell Expand-Archive…', 'tar extraction failed, falling back to PowerShell Expand-Archive…'), 'stderr')
-      const ps = await runAsync(
-        'powershell',
-        ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath '${zip}' -DestinationPath '${stage}'`],
-        root,
-        label,
-        true,
-        undefined,
-        EXTRACT_TIMEOUT_MS
-      )
-      if (!ps.ok || !existsSync(inner)) {
-        taskDone(label, 1)
-        return { ok: false, code: 1, error: t('Node 解压失败(请检查磁盘空间 / 网络)', 'Failed to extract Node (check disk space / network)') }
-      }
+    const okExtract = await extractZip(zip, stage, label)
+    if (!okExtract || !existsSync(inner)) {
+      taskDone(label, 1)
+      return { ok: false, code: 1, error: t('Node 解压失败(请检查磁盘空间 / 网络)', 'Failed to extract Node (check disk space / network)') }
     }
     if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
     renameSync(inner, dir)

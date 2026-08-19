@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import { api, type ApiPreset, type LauncherConfig } from '../lib/api'
+import { api, type LauncherConfig } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
 import { useI18n } from '../i18n'
+import { MARKET_SOURCES } from '../../../shared/plugin-sources'
+import type { MarketSourceId } from '../../../shared/types'
 import { TaskConsole } from '../components/TaskConsole'
 import { Toggle } from '../components/Toggle'
-import { DownloadIcon, RefreshIcon, PowerIcon, PlusIcon, TrashIcon } from '../lib/icons'
+import { DownloadIcon, RefreshIcon, PowerIcon } from '../lib/icons'
 import whaleIcon from '../assets/whale.png'
 import rueIcon from '../assets/rue.png'
 import proto1Icon from '../assets/proto1.png'
@@ -25,24 +27,18 @@ function Field({ label, value, onChange, mono = true, hint }: { label: string; v
 
 export function Settings(): JSX.Element {
   const { config, saveConfig, tasks, refresh } = useHarness()
-  const { t } = useI18n()
-  const [tab, setTab] = useState<'dsh' | 'api' | 'system'>('dsh')
+  const { t, lang } = useI18n()
+  const [tab, setTab] = useState<'dsh' | 'system'>('dsh')
   const [form, setForm] = useState<Partial<LauncherConfig>>({})
-  const [saved, setSaved] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [dlBusy, setDlBusy] = useState(false)
   const [dlDone, setDlDone] = useState(false)
   const [rtBusy, setRtBusy] = useState<'install' | 'update' | null>(null)
   const [rtDone, setRtDone] = useState(false)
-  // API presets are edited in a dedicated local state (nested array in config).
-  const [presets, setPresets] = useState<ApiPreset[]>([])
-  const [activeId, setActiveId] = useState('deepseek-official')
 
   useEffect(() => {
     if (config) {
       setForm((f) => ({ ...f, ...config }))
-      setPresets((config.apiPresets ?? []).map((p) => ({ ...p })))
-      setActiveId(config.activeApiPresetId ?? 'deepseek-official')
     }
   }, [config])
 
@@ -51,45 +47,8 @@ export function Settings(): JSX.Element {
     if (tab === 'system') {
       // System settings persist on every change — no Save button to forget
       // (checked a box at the top and left without saving was easy to do).
-      setSaved(true)
-      setTimeout(() => setSaved(false), 1500)
       void saveConfig({ [k]: v } as Partial<LauncherConfig>)
-    } else {
-      setSaved(false)
     }
-  }
-
-  const doSave = async (): Promise<void> => {
-    await saveConfig({
-      ...(form as Partial<LauncherConfig>),
-      apiPresets: presets,
-      activeApiPresetId: activeId
-    })
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
-  }
-
-  // --- API preset editing (local state, persisted together with doSave) ---
-  const updatePreset = (id: string, patch: Partial<ApiPreset>): void => {
-    setPresets((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)))
-    setSaved(false)
-  }
-  const setActivePreset = (id: string): void => {
-    setActiveId(id)
-    setSaved(false)
-  }
-  const removePreset = (id: string): void => {
-    setPresets((ps) => {
-      const next = ps.filter((p) => p.id !== id)
-      if (activeId === id) setActiveId(next[0]?.id ?? '')
-      return next
-    })
-    setSaved(false)
-  }
-  const addPreset = (): void => {
-    const id = `custom-${Date.now()}`
-    setPresets((ps) => [...ps, { id, name: t('settings.newPresetName'), baseUrl: '', balanceUrl: '', apiKey: '', local: false }])
-    setSaved(false)
   }
 
   const run = async (label: string, fn: () => Promise<unknown>): Promise<void> => {
@@ -153,7 +112,7 @@ export function Settings(): JSX.Element {
 
       {/* tab bar — click to jump straight to the section */}
       <div className="flex gap-1 border-b" style={{ borderColor: 'var(--border)' }}>
-        {(['dsh', 'api', 'system'] as const).map((k) => (
+        {(['dsh', 'system'] as const).map((k) => (
           <button
             key={k}
             className="border-b-2 px-3 pb-2 text-[13px] font-medium transition-colors"
@@ -163,7 +122,7 @@ export function Settings(): JSX.Element {
             }}
             onClick={() => setTab(k)}
           >
-            {k === 'dsh' ? t('settings.dshTitle') : k === 'api' ? t('settings.apiTitle') : t('settings.systemTitle')}
+            {k === 'dsh' ? t('settings.dshTitle') : t('settings.systemTitle')}
           </button>
         ))}
       </div>
@@ -227,7 +186,7 @@ export function Settings(): JSX.Element {
           >
             {t('settings.sourceTitle')}
           </summary>
-          <p className="text-[12px] leading-relaxed" style={{ color: 'var(--warn)' }}>
+          <p className="select-text text-[12px] leading-relaxed" style={{ color: 'var(--warn)' }}>
             {t('settings.sourceDesc')}
           </p>
           <p className="text-[12px] leading-relaxed" style={{ color: 'var(--muted)' }}>
@@ -276,124 +235,6 @@ export function Settings(): JSX.Element {
       </section>
       )}
 
-      {tab === 'api' && (
-      <section className="space-y-4">
-        <div className="panel p-5 space-y-4">
-          <div className="space-y-1">
-            <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--muted)' }}>
-              {t('settings.apiDesc')} <span className="mono">~/.dsh/.credentials.yaml</span>{t('settings.apiDesc.tail')}
-            </p>
-          </div>
-          <Field label={t('settings.deepseekApiKey')} value={form.deepseekApiKey ?? ''} onChange={set('deepseekApiKey')} mono={false} hint={t('settings.deepseekApiKeyHint')} />
-          <div className="space-y-3">
-            {presets.length === 0 && (
-              <p className="text-[12.5px]" style={{ color: 'var(--muted)' }}>
-                {t('settings.noPresets')}
-              </p>
-            )}
-            {presets.map((p) => {
-              const isActive = p.id === activeId
-              return (
-                <div
-                  key={p.id}
-                  className="border rounded-lg p-3 space-y-2.5"
-                  style={{
-                    borderColor: isActive ? 'var(--accent)' : 'var(--border)',
-                    background: isActive ? 'var(--accent-soft)' : 'transparent'
-                  }}
-                >
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <input
-                        className="input mono"
-                        value={p.name}
-                        placeholder={t('settings.presetNamePlaceholder')}
-                        onChange={(e) => updatePreset(p.id, { name: e.target.value })}
-                        style={{ width: 180 }}
-                      />
-                      {isActive && (
-                        <span className="badge" style={{ color: '#fff', background: 'var(--accent)' }}>
-                          {t('settings.current')}
-                        </span>
-                      )}
-                      <label
-                        className="flex items-center gap-1.5 text-[12px] cursor-pointer"
-                        style={{ color: p.local ? 'var(--accent)' : 'var(--muted)' }}
-                        title={t('settings.localModelHint')}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={!!p.local}
-                          onChange={(e) => updatePreset(p.id, { local: e.target.checked })}
-                        />
-                        {t('settings.localModel')}
-                      </label>
-                    </div>
-                    <div className="flex gap-2">
-                      {!isActive && (
-                        <button className="btn btn-ghost btn-sm" onClick={() => setActivePreset(p.id)}>
-                          {t('settings.setActive')}
-                        </button>
-                      )}
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => removePreset(p.id)}
-                        disabled={presets.length <= 1}
-                      >
-                        <TrashIcon /> {t('settings.delete')}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="grid sm:grid-cols-2 gap-2.5">
-                    <div className={p.local ? 'sm:col-span-2' : ''}>
-                      <label className="label">{t('settings.baseUrl')}</label>
-                      <input
-                        className="input mono"
-                        value={p.baseUrl}
-                        placeholder={p.local ? 'http://localhost:11434/v1' : 'https://api.deepseek.com'}
-                        onChange={(e) => updatePreset(p.id, { baseUrl: e.target.value })}
-                      />
-                    </div>
-                    {!p.local && (
-                      <div>
-                        <label className="label">{t('settings.balanceUrl')}</label>
-                        <input
-                          className="input mono"
-                          value={p.balanceUrl}
-                          placeholder="https://api.deepseek.com/user/balance"
-                          onChange={(e) => updatePreset(p.id, { balanceUrl: e.target.value })}
-                        />
-                      </div>
-                    )}
-                    {!p.local && (
-                      <div className="sm:col-span-2">
-                        <label className="label">{t('settings.apiKey')}</label>
-                        <input
-                          className="input mono"
-                          type="password"
-                          value={p.apiKey ?? ''}
-                          placeholder="sk-…"
-                          onChange={(e) => updatePreset(p.id, { apiKey: e.target.value })}
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-          <div className="flex items-center gap-2">
-            <button className="btn btn-ghost btn-sm" onClick={addPreset}>
-              <PlusIcon /> {t('settings.addPreset')}
-            </button>
-            <button className="btn btn-primary btn-sm" onClick={() => void doSave()}>
-              {saved ? t('settings.saved') : t('settings.save')}
-            </button>
-          </div>
-        </div>
-      </section>
-      )}
-
       {tab === 'system' && (
       <section className="space-y-4">
         <div className="panel p-5 space-y-5">
@@ -417,6 +258,20 @@ export function Settings(): JSX.Element {
                 value={form.marketPageSize ?? 30}
                 onChange={(e) => set('marketPageSize')(Number(e.target.value) || 30)}
               />
+            </div>
+            <div>
+              <label className="label">{t('settings.marketSource')}</label>
+              <select
+                className="input"
+                value={form.marketSource ?? 'github'}
+                onChange={(e) => set('marketSource')(e.target.value as MarketSourceId)}
+              >
+                {MARKET_SOURCES.map((src) => (
+                  <option key={src.id} value={src.id}>
+                    {lang === 'zh' ? src.zhName : src.enName}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
           <div>

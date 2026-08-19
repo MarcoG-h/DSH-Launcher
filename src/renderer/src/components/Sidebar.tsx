@@ -2,19 +2,26 @@ import type { JSX } from 'react'
 import { useHarness } from '../hooks/useHarness'
 import { useTheme } from '../hooks/useTheme'
 import { useI18n } from '../i18n'
+import { api, type DshInstance } from '../lib/api'
 import {
   TerminalIcon,
+  ListIcon,
   PuzzleIcon,
   GearIcon,
   PanelIcon,
   ChevronIcon,
+  PlusIcon,
   SunIcon,
-  MoonIcon
+  MoonIcon,
+  PlayIcon,
+  StopIcon,
+  NewWindowIcon,
+  WindowReturnIcon
 } from '../lib/icons'
 import { StatusPill } from './StatusPill'
 import whaleIcon from '../assets/whale.png'
 
-export type PageId = 'dashboard' | 'plugins' | 'settings'
+export type PageId = 'dashboard' | 'instances' | 'plugins' | 'settings'
 
 interface SidebarProps {
   view: PageId | 'dsh'
@@ -25,14 +32,40 @@ interface SidebarProps {
   width: number
 }
 
-export function Sidebar({ view, setView, collapsed, setCollapsed, width }: SidebarProps): JSX.Element {
-  const { state, config, runningTasks } = useHarness()
-  const [theme, toggleTheme] = useTheme()
-  const { lang, t, setLang } = useI18n()
+/** Status dot color per harness status (mirrors StatusPill). */
+const STATUS_COLOR: Record<string, string> = {
+  running: 'var(--ok)',
+  starting: 'var(--accent)',
+  stopping: 'var(--warn)',
+  error: 'var(--err)',
+  stopped: 'var(--muted)',
+  external: 'var(--warn)'
+}
+const STATUS_PULSE: Record<string, boolean> = {
+  starting: true,
+  stopping: true
+}
 
-  // The DSH view is only reachable once the port is actually ready. The status
-  // dot only shows when something is wrong — red for a harness error, yellow
-  // for an externally running instance. Start/stop live on the dashboard.
+export function Sidebar({ view, setView, collapsed, setCollapsed, width }: SidebarProps): JSX.Element {
+  const { state, config, runningTasks, instances, states, activeInstanceId, poppedOut, setActiveInstance } = useHarness()
+  const [theme, toggleTheme] = useTheme()
+  const { lang, t, setLang, statusLabel } = useI18n()
+  // Hidden instances stay out of the sidebar — manage them from the Instances page.
+  const visible = instances.filter(i => i.enabled !== false)
+
+  // Clicking an instance row switches the active instance, and — when that
+  // instance is up and not popped out — jumps straight to its DSH view (collapsing
+  // the rail, like pressing the DSH nav item). No view switch when it's not ready
+  // so we don't flash the dashboard back over the stopped instance.
+  const onInstanceClick = async (inst: DshInstance): Promise<void> => {
+    await setActiveInstance(inst.id)
+    const st = states[inst.id]?.status ?? 'stopped'
+    if ((st === 'running' || st === 'external') && !poppedOut[inst.id]) {
+      setView('dsh')
+    }
+  }
+
+  // The DSH view is only reachable once the active instance's port is ready.
   const status = state?.status ?? 'stopped'
   const ready = status === 'running' || status === 'external'
   const showStatus = status === 'error' || status === 'external'
@@ -40,6 +73,7 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
   const items: { id: PageId | 'dsh'; label: string; icon: JSX.Element; disabled?: boolean }[] = [
     { id: 'dsh', label: t('nav.dsh'), icon: <PanelIcon />, disabled: !ready },
     { id: 'dashboard', label: t('nav.dashboard'), icon: <TerminalIcon /> },
+    { id: 'instances', label: t('nav.instances'), icon: <ListIcon /> },
     { id: 'plugins', label: t('nav.plugins'), icon: <PuzzleIcon /> },
     { id: 'settings', label: t('nav.settings'), icon: <GearIcon /> }
   ]
@@ -81,6 +115,103 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
           </div>
         )}
       </div>
+
+      {/* Instances — click to switch which dsh the dashboard/DSH view shows.
+          Each row carries a status dot so you can watch every instance at once. */}
+      {!dshRail && instances.length > 0 && (
+        <div className={`shrink-0 ${collapsed ? 'px-2 py-1 space-y-1.5' : 'px-2.5 pb-1 space-y-0.5'}`}>
+          {!collapsed && (
+            <div className="flex items-center justify-between px-2 pt-0.5 pb-1">
+              <span className="text-[11px] font-medium uppercase tracking-wide" style={{ color: 'var(--muted)' }}>
+                {t('sidebar.instances')}
+              </span>
+              <button
+                className="btn btn-ghost btn-sm !p-1"
+                title={t('sidebar.addInstance')}
+                onClick={() => setView('instances')}
+              >
+                <PlusIcon />
+              </button>
+            </div>
+          )}
+          <div className="space-y-0.5">
+            {visible.map((inst) => {
+              const st = states[inst.id]?.status ?? 'stopped'
+              const pending = states[inst.id]?.pendingRestart === true
+              const isActive = inst.id === activeInstanceId
+              // A pending plugin change turns the dot yellow until the instance
+              // is manually restarted (harness clears the flag when running).
+              const color = pending ? 'var(--warn)' : (STATUS_COLOR[st] ?? STATUS_COLOR.stopped)
+              const pulse = STATUS_PULSE[st] === true
+              // Start/stop mirrors the Dashboard control: anything but a clean
+              // idle/error shows stop (incl. starting/stopping/external).
+              const canStop = st !== 'stopped' && st !== 'error'
+              const canOpenUi = st === 'running' || st === 'external'
+              // The instance toggles between running embedded in the launcher and
+              // running in a separate (popped-out) child window.
+              const popped = !!poppedOut[inst.id]
+              return (
+                <div
+                  key={inst.id}
+                  className="w-full flex items-center gap-1 rounded-lg"
+                  style={{
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    background: isActive ? 'var(--accent-soft)' : 'transparent'
+                  }}
+                >
+                  <button
+                    onClick={() => void onInstanceClick(inst)}
+                    title={`${inst.name} · ${statusLabel(st)}${pending ? ' · ' + t('sidebar.pendingRestart') : ''}`}
+                    className="min-w-0 flex-1 flex items-center gap-2 rounded-lg cursor-pointer select-none"
+                    style={{
+                      justifyContent: collapsed ? 'center' : 'flex-start',
+                      padding: collapsed ? '6px' : '5px 8px',
+                      color: isActive ? 'var(--accent)' : 'var(--text)'
+                    }}
+                  >
+                    <span
+                      className={`badge-dot shrink-0${pulse ? ' pulse-live' : ''}`}
+                      style={{ background: color }}
+                    />
+                    {!collapsed && <span className="truncate text-[12px]">{inst.name}</span>}
+                    {!collapsed && pending && (
+                      <span
+                        className="badge shrink-0 !px-1.5 text-[10px]"
+                        style={{ color: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 16%, transparent)' }}
+                      >
+                        {t('sidebar.pendingRestart')}
+                      </span>
+                    )}
+                  </button>
+                  {!collapsed && (
+                    <>
+                      {/* Toggle the selected, running instance between embedded
+                          and a launcher child window (drag it to another monitor).
+                          Only visible for the selected instance while running. */}
+                      {isActive && canOpenUi && (
+                        <button
+                          className={`btn btn-sm !p-1 ${popped ? 'btn-primary' : 'btn-ghost'}`}
+                          title={popped ? t('sidebar.returnIntegrated') : t('sidebar.openNewWindow')}
+                          onClick={() => void (popped ? api.closeInstanceWindow(inst.id) : api.openInstanceWindow(inst.id))}
+                        >
+                          {popped ? <WindowReturnIcon /> : <NewWindowIcon />}
+                        </button>
+                      )}
+                      <button
+                        className="btn btn-ghost btn-sm !p-1"
+                        title={canStop ? t('sidebar.stop') : t('sidebar.start')}
+                        onClick={() => void (canStop ? api.stopInstance(inst.id) : api.startInstance(inst.id))}
+                      >
+                        {canStop ? <StopIcon /> : <PlayIcon />}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Nav — icon-only thumbnails when the DSH rail is collapsed; clicking a
           thumbnail expands the menu and jumps to that page. */}

@@ -2,7 +2,7 @@
 
 > The most convenient DSH launcher and third-party plugin manager: one-click installation, a native client UI, and quick start & restart.
 
-DSH Launcher is a desktop launcher for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), built with Electron + React + Tailwind. It brings "install the runtime, start, restart, manage third-party plugins, and switch APIs" together into one local client.
+DSH Launcher is a desktop launcher for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness), built with Electron + React + Tailwind. It brings "install the runtime, start, restart, and manage third-party plugins" together into one local client.
 
 [中文 README](README.md)
 
@@ -13,7 +13,6 @@ DSH Launcher is a desktop launcher for [DeepSeek Harness](https://github.com/dee
 ## Features
 
 - **One-click installation / quick offline deployment** — no Node.js or source code required; deploy a portable Node + dsh runtime in one click and start using dsh directly, fully offline.
-- **Quick API switching** — for users who want to use non-DeepSeek APIs (cc-switch style): connect to any vendor you like and switch at any time.
 - **Native client UI** — everything happens inside the desktop app; the DSH web UI can be embedded in-app (with working IME input), no browser round-trips.
 - **Quick start & restart** — start / stop / restart dsh with one click; auto-enters the DSH view once it's ready.
 - **Third-party plugin management** — browse local plugins, install / remove / enable / disable, one-click download from GitHub. Installed plugins are archived locally.
@@ -51,12 +50,6 @@ Go back to **"Dashboard"**, click **"Start"**. Once it's ready, the app automati
 
 Need an API key? Visit the [DeepSeek open platform](https://platform.deepseek.com).
 
-### Optional: switch API vendors in one click
-
-In "Settings → API switching", you can add / switch AI vendor presets (DeepSeek official, relays, SiliconFlow, etc.). The preset address and API key are injected into dsh automatically at startup — no need to fill them in the DSH UI again; restart dsh after switching.
-
-![API switching](screenshots/quickstart-4-api-switch.png)
-
 ## Development & Building
 
 ```bash
@@ -67,7 +60,7 @@ pnpm build      # build
 
 ## Privacy
 
-- The DeepSeek API key is only read locally in the main process (the key set in Settings takes precedence; otherwise it is read from `~/.dsh/.credentials.yaml`). It is never written to logs or uploaded anywhere.
+- The DeepSeek API key is only read locally in the main process from `~/.dsh/.credentials.yaml`. It is never written to logs or uploaded anywhere.
 
 ## License
 

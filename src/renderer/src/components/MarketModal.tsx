@@ -6,6 +6,7 @@ import { useI18n } from '../i18n'
 import { renderMarkdown } from '../lib/markdown'
 import { TaskConsole } from './TaskConsole'
 import { DownloadIcon } from '../lib/icons'
+import { CopyButton } from './CopyButton'
 
 function fmtDate(iso: string, lang: 'zh' | 'en'): string {
   const d = new Date(iso)
@@ -23,7 +24,7 @@ interface Props {
 /** Detail modal for a market plugin: metadata + README + one-click install. */
 export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props): JSX.Element {
   const { t, lang } = useI18n()
-  const { tasks } = useHarness()
+  const { tasks, activeInstanceId } = useHarness()
   const readmeRef = useRef<HTMLDivElement>(null)
   const [readme, setReadme] = useState<MarketReadme | null>(null)
   const [readmeLoading, setReadmeLoading] = useState(true)
@@ -60,7 +61,9 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
     setInstalling(true)
     setInstallError(null)
     try {
-      const r: CmdResult = await api.downloadPlugin(`github:${repo.fullName}`, subdir)
+      // 源B(DSH 1024Store)的 install 命令里带 #path: 子包提示,直达该子包;
+      // 没有 hint 的仓库走现有流程(多子包仓库克隆后弹选择器)。
+      const r: CmdResult = await api.downloadPlugin(`github:${repo.fullName}`, subdir ?? repo.subdirHint, activeInstanceId)
       if (r.ok) {
         setPendingPkgs(null)
         onInstalled()
@@ -127,6 +130,11 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
                   {repo.language}
                 </span>
               )}
+              {repo.archived && (
+                <span className="badge" style={{ color: 'var(--muted)', background: 'var(--bg-soft)', border: '1px solid var(--border)' }}>
+                  {t('market.archived')}
+                </span>
+              )}
               {isInstalled && (
                 <span className="badge" style={{ color: 'var(--ok)', background: 'color-mix(in srgb, var(--ok) 14%, transparent)' }}>
                   {t('market.installed')}
@@ -147,6 +155,15 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
                 ))}
               </div>
             )}
+            {repo.isRisky && (
+              <div
+                className="mt-2 rounded-md border px-2.5 py-1.5 text-[12px] leading-relaxed"
+                style={{ borderColor: 'var(--warn)', color: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 8%, transparent)' }}
+              >
+                ⚠ {t('market.riskWarning')}
+                {repo.riskNote ? ` — ${repo.riskNote}` : ''}
+              </div>
+            )}
           </div>
           <button className="btn btn-ghost btn-sm shrink-0" onClick={onClose}>
             ✕
@@ -164,6 +181,7 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
             GitHub ↗
           </a>
           <span className="ml-auto text-[11.5px]" style={{ color: 'var(--muted)' }}>
+            {repo.installs30d != null && `${t('market.installs30d', { count: repo.installs30d })} · `}
             {t('market.updated', { date: fmtDate(repo.updatedAt, lang) })} · {repo.forks} forks
           </span>
         </div>
@@ -196,8 +214,9 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
 
         {/* install error surfaced from downloadPlugin (e.g. repo has no dsh plugin) */}
         {installError && (
-          <div className="border-b px-4 py-3 text-[12.5px]" style={{ borderColor: 'var(--border)', color: 'var(--warn)' }}>
-            {installError}
+          <div className="flex items-start justify-between gap-2 border-b px-4 py-3 text-[12.5px]" style={{ borderColor: 'var(--border)', color: 'var(--warn)' }}>
+            <span className="select-text break-all">{installError}</span>
+            <CopyButton text={installError} />
           </div>
         )}
 
@@ -228,9 +247,10 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
               }}
             />
           ) : (
-            <p className="text-[12.5px]" style={{ color: 'var(--warn)' }}>
-              {readme?.error ?? t('market.readmeFailed')}
-            </p>
+            <div className="flex items-start justify-between gap-2 text-[12.5px]" style={{ color: 'var(--warn)' }}>
+              <p className="select-text break-all">{readme?.error ?? t('market.readmeFailed')}</p>
+              <CopyButton text={readme?.error ?? t('market.readmeFailed')} />
+            </div>
           )}
         </div>
       </div>

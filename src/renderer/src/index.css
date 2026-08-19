@@ -115,6 +115,15 @@ body {
   background: rgba(239, 68, 68, 0.1);
 }
 
+.btn-plain {
+  background: transparent;
+  color: var(--text);
+}
+
+.btn-plain:hover:not(:disabled) {
+  background: var(--card-hover);
+}
+
 .btn-sm {
   padding: 4px 10px;
   font-size: 12px;

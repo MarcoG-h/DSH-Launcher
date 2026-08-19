@@ -57,6 +57,15 @@ export function runAsync(cmd: string, args: string[], cwd: string, label: string
     let settled = false
     let timedOut = false
     let timer: NodeJS.Timeout | null = null
+    // Keep the tail of stderr so callers can diagnose failures (e.g. pnpm's
+    // ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED names the offending package). No
+    // stderr is shown in the UI, only attached to the CmdResult.
+    let stderrTail = ''
+    const STDERR_CAP = 8192
+    const appendStderr = (text: string): void => {
+      stderrTail = (stderrTail + text).slice(-STDERR_CAP)
+    }
+    const withStderr = (r: CmdResult): CmdResult => (stderrTail ? { ...r, stderr: stderrTail } : r)
     const finish = (result: CmdResult): void => {
       if (settled) return
       settled = true
@@ -111,27 +120,30 @@ export function runAsync(cmd: string, args: string[], cwd: string, label: string
     })
     child.stderr?.on('data', (c) => {
       touch()
+      appendStderr(c.toString('utf8'))
       emit('stderr')(c)
     })
     child.on('error', (err) => {
       stopWatchdog()
       broadcast({ type: 'task', task: { label, status: 'end', code: null } })
-      finish({ ok: false, code: null, error: err.message })
+      finish(withStderr({ ok: false, code: null, error: err.message }))
     })
     child.on('close', (code) => {
       stopWatchdog()
       broadcast({ type: 'task', task: { label, status: 'end', code } })
       if (timedOut) {
-        finish({
-          ok: false,
-          code: null,
-          error: t(
-            '操作超时,已终止。可能网络较慢,或该仓库为私有/不存在(需登录,可在 设置→系统管理 填写 GitHub 访问令牌)。',
-            'Operation timed out and was aborted. The network may be slow, or the repo is private/nonexistent (login required — add a GitHub access token in Settings → System).'
-          )
-        })
+        finish(
+          withStderr({
+            ok: false,
+            code: null,
+            error: t(
+              '操作超时,已终止。可能网络较慢,或该仓库为私有/不存在(需登录,可在 设置→系统管理 填写 GitHub 访问令牌)。',
+              'Operation timed out and was aborted. The network may be slow, or the repo is private/nonexistent (login required — add a GitHub access token in Settings → System).'
+            )
+          })
+        )
       } else {
-        finish({ ok: code === 0, code })
+        finish(withStderr({ ok: code === 0, code }))
       }
     })
   })

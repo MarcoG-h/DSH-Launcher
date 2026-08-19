@@ -39,6 +39,9 @@ export function registerOrb(host: BrowserWindow): void {
   host.on('resize', () => {
     if (shown) clampAndPlace()
   })
+  // A DSH view created later (new instance) would land on top of the orb —
+  // re-append the orb so it stays the topmost child.
+  dshview.onDshViewAdded(restack)
   host.on('closed', () => {
     cancelAnim()
     orb?.webContents.close()
@@ -98,6 +101,17 @@ function destroyOrb(): void {
   }
   orb = null
   grab = null
+}
+
+/** Re-append the orb as the window's last child so it stays on top of all DSH views. */
+function restack(): void {
+  if (!win || !orb) return
+  try {
+    win.contentView.removeChildView(orb)
+    win.contentView.addChildView(orb)
+  } catch {
+    /* view may already be gone */
+  }
 }
 
 function loadOrb(wc: WebContents): void {
