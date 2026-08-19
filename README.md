@@ -103,7 +103,7 @@ DSH Web 直接内嵌在客户端窗口里。</p>
 - 下载过程显示进度条，整合包内插件均独立下载，相互隔离
 - 对于第三方插件，常有插件之间的兼容性问题，整合包加入补丁修复兼容问题（详见：[插件包](https://github.com/baihejiangnan/dsh-plugin-pack-web)）
 
-![推荐整合包](screenshots/bundle.png)
+
 
 ### 新版插件市场
 
