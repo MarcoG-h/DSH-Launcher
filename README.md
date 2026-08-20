@@ -8,7 +8,7 @@
 <a href="https://github.com/MarcoG-h/DSH-Launcher"><img src="https://img.shields.io/github/stars/MarcoG-h/DSH-Launcher?style=flat&label=%E2%AD%90&color=08C" alt="GitHub stars"></a>
 <a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/Windows-10%2F11-4493F8?style=flat" alt="Windows"></a>
 <a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/Desktop-App-47848F?style=flat" alt="Desktop App"></a>
-<a href="https://github.com/MarcoG-h/DSH-Launcher/releases/tag/v3.0.0"><img src="https://img.shields.io/badge/v3.0.0-Release-2EA44F?style=flat" alt="v3.0.0"></a>
+<a href="https://github.com/MarcoG-h/DSH-Launcher/releases/tag/v3.0.1"><img src="https://img.shields.io/badge/v3.0.1-Release-2EA44F?style=flat" alt="v3.0.1"></a>
 <a href="https://github.com/MarcoG-h/DSH-Launcher/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
 </p>
 
@@ -56,7 +56,7 @@ DSH Web 直接内嵌在客户端窗口里。</p>
 
 | 文件 | 说明 | 大小 |
 | --- | --- | --- |
-| [安装版 exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v3.0.0/DSH.Launcher.Setup.3.0.0.exe) | NSIS 安装到系统,自动创建桌面 / 开始菜单快捷方式 | ~100 MB |
+| [安装版 exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v3.0.1/DSH.Launcher.Setup.3.0.1.exe) | NSIS 安装到系统,自动创建桌面 / 开始菜单快捷方式 | ~100 MB |
 
 更多版本见 [Releases 页面](https://github.com/MarcoG-h/DSH-Launcher/releases)。
 
