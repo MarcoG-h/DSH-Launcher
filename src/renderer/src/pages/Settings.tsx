@@ -26,7 +26,7 @@ function Field({ label, value, onChange, mono = true, hint }: { label: string; v
 }
 
 export function Settings(): JSX.Element {
-  const { config, saveConfig, tasks, refresh } = useHarness()
+  const { config, saveConfig, tasks, refresh, dshUpdate } = useHarness()
   const { t, lang } = useI18n()
   const [tab, setTab] = useState<'dsh' | 'system'>('dsh')
   const [form, setForm] = useState<Partial<LauncherConfig>>({})
@@ -155,6 +155,16 @@ export function Settings(): JSX.Element {
                 {t('settings.updateNote.pre')} <span className="mono">~/.dsh</span> {t('settings.updateNote.mid')}
                 <span className="mono"> cordis.patch.yml</span> {t('settings.updateNote.tail')}
               </p>
+              {dshUpdate?.latest && (
+                <p
+                  className="text-[12.5px] leading-relaxed"
+                  style={{ color: dshUpdate.update && dshUpdate.current ? 'var(--warn)' : 'var(--muted)' }}
+                >
+                  {dshUpdate.update && dshUpdate.current
+                    ? t('settings.dshUpdateAvailable', { latest: dshUpdate.latest, current: dshUpdate.current })
+                    : t('settings.dshUpToDate', { latest: dshUpdate.latest })}
+                </p>
+              )}
             </div>
             <div className="flex gap-2 shrink-0">
               <button className="btn btn-primary shrink-0" disabled={rtBusy !== null} onClick={() => void doInstallRuntime()}>

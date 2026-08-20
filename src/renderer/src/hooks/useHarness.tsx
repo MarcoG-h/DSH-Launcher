@@ -36,6 +36,8 @@ interface HarnessContextValue {
   /** error from the last start/stop/restart action, surfaced in the UI */
   actionError: string | null
   dismissError: () => void
+  /** 官方 dsh 最新版 vs 当前内置版(启动时后台检查;未查到/未内置时为 null) */
+  dshUpdate: { latest: string | null; current: string | null; update: boolean } | null
 }
 
 const HarnessContext = createContext<HarnessContextValue | null>(null)
@@ -56,6 +58,7 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
   const [tasks, setTasks] = useState<Record<string, TaskLog>>({})
   const [runningTasks, setRunningTasks] = useState<string[]>([])
   const [actionError, setActionError] = useState<string | null>(null)
+  const [dshUpdate, setDshUpdate] = useState<{ latest: string | null; current: string | null; update: boolean } | null>(null)
   const pluginsVersion = useRef(0)
 
   const reloadPlugins = useCallback(() => {
@@ -96,6 +99,8 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
         setActiveInstanceId(e.activeInstanceId)
       } else if (e.type === 'popup') {
         setPoppedOut((prev) => ({ ...prev, [e.instanceId]: e.open }))
+      } else if (e.type === 'dsh-update') {
+        setDshUpdate({ latest: e.latest, current: e.current, update: e.latest !== null && e.current !== null && e.latest !== e.current })
       } else if (e.type === 'task') {
         const t = e.task
         setTasks((prev) => {
@@ -223,7 +228,8 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
         saveConfig,
         reloadPlugins,
         actionError,
-        dismissError
+        dismissError,
+        dshUpdate
       }}
     >
       {children}

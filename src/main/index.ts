@@ -2,7 +2,7 @@ import { app, BrowserWindow, shell } from 'electron'
 import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { bindWindow } from './bus'
+import { bindWindow, broadcast } from './bus'
 import { getConfig } from './config'
 import * as dshStatus from './dsh-status'
 import { registerDshView } from './dshview'
@@ -10,6 +10,7 @@ import { registerIpc } from './ipc'
 import { registerOrb } from './orb'
 import { startAllAutoStart, stopAllSync } from './harness'
 import * as plugins from './plugins'
+import * as runtime from './runtime'
 import { ensureShortcuts } from './shortcuts'
 import { preloadPath } from './preload'
 import { hideToTray, initTray, markQuitting, showLauncher } from './tray'
@@ -106,6 +107,8 @@ if (!gotTheLock) {
     registerIpc()
     dshStatus.init()
     ensureShortcuts()
+    // 后台检查官方 dsh 是否有新版本(不阻塞启动,网络失败静默)。结果广播给 UI。
+    void runtime.checkDshUpdate().then((r) => broadcast({ type: 'dsh-update', latest: r.latest, current: r.current }))
     // autoStartOnLaunch (Settings): start every instance flagged autoStart as
     // soon as the app boots, before the window is created, so they boot in
     // parallel with the startup splash — by the time the animation ends, dsh is

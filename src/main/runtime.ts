@@ -3,7 +3,7 @@
 // no pnpm, and no harness source checkout.
 
 import { spawn } from 'node:child_process'
-import { createWriteStream, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { get as httpsGet } from 'node:https'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -50,6 +50,52 @@ export function resolveBundledDshBin(): string | null {
 
 export function runtimeInstalled(): boolean {
   return resolveBundledNode() !== null && resolveBundledDshBin() !== null
+}
+
+/** 当前内置 @deepseek-ai/dsh 的版本;未安装内置运行环境时返回 null。 */
+export function currentDshVersion(): string | null {
+  try {
+    const p = join(dshInstallDir(), 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
+    if (!existsSync(p)) return null
+    return String((JSON.parse(readFileSync(p, 'utf8')) as { version?: unknown }).version ?? '')
+  } catch {
+    return null
+  }
+}
+
+/** 查询 registry 上 @deepseek-ai/dsh 的最新稳定版本;网络失败返回 null(不抛错)。 */
+export function latestDshVersion(timeoutMs = 8000): Promise<string | null> {
+  return new Promise((resolve) => {
+    const req = httpsGet(`${REGISTRY}/@deepseek-ai/dsh/latest`, { timeout: timeoutMs }, (res) => {
+      let body = ''
+      res.setEncoding('utf8')
+      res.on('data', (c) => { body += c })
+      res.on('end', () => {
+        try {
+          const data = JSON.parse(body) as { version?: unknown }
+          resolve(typeof data.version === 'string' && data.version ? data.version : null)
+        } catch {
+          resolve(null)
+        }
+      })
+    })
+    req.on('timeout', () => { req.destroy(); resolve(null) })
+    req.on('error', () => resolve(null))
+  })
+}
+
+/** 当前内置 dsh 版本 vs 官方最新版。 */
+export interface DshUpdateCheck {
+  latest: string | null
+  current: string | null
+  update: boolean
+}
+
+/** 对比当前内置 dsh 与官方最新稳定版;仅当两者都存在且不同时视为有更新。 */
+export async function checkDshUpdate(): Promise<DshUpdateCheck> {
+  const latest = await latestDshVersion()
+  const current = currentDshVersion()
+  return { latest, current, update: latest !== null && current !== null && latest !== current }
 }
 
 /** Compare dotted version strings: returns true when a >= b (missing parts = 0). */
@@ -217,7 +263,10 @@ export async function installRuntime(): Promise<CmdResult> {
   // so the bundled dsh can boot (e.g. existing 22.14 installs self-heal on re-deploy).
   const MIN_NODE = '22.19.0'
   const ver = nodeVersionAtLeast(cfg.nodeVersion || '', MIN_NODE) ? cfg.nodeVersion : MIN_NODE
-  const dshVer = cfg.dshVersion || '0.1.0-rc.6'
+  // dsh 不在安装包里自带,部署时从 registry 拉取。默认跟随最新稳定版(latest);
+  // 只在用户显式设置 dshVersion 时固定到指定版本。旧版本残留的默认值
+  // '0.1.0-rc.6' 视为「未指定」,让老用户直接跟随最新。
+  const dshVer = cfg.dshVersion && cfg.dshVersion !== '0.1.0-rc.6' ? cfg.dshVersion : 'latest'
   const dir = nodeDir()
   const stage = join(root, '.node-stage')
   const zip = join(root, `node-v${ver}-win-x64.zip`)
@@ -347,7 +396,7 @@ export async function updateRuntime(): Promise<CmdResult> {
     taskDone(label, 1)
     return { ok: false, code: 1, error: t('运行环境未安装', 'Runtime not installed') }
   }
-  const dshVer = cfg.dshVersion || '0.1.0-rc.6'
+  const dshVer = cfg.dshVersion && cfg.dshVersion !== '0.1.0-rc.6' ? cfg.dshVersion : 'latest'
   const pnpm = join(nodeDir(), 'pnpm.cmd')
   if (!existsSync(pnpm)) {
     taskLine(label, t('[runtime] 未找到 pnpm,请先重新「一键安装运行环境」。', '[runtime] pnpm not found — please re-run "Install runtime" first.'), 'stderr')
