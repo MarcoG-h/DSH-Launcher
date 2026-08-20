@@ -3,7 +3,7 @@
 // workspace); this module is the read/write surface and the session-isolation
 // helpers. The spawned processes themselves are managed by harness.ts.
 
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { getConfig, setConfig } from './config'
@@ -50,6 +50,30 @@ supportedArchitectures:
 /** `<home>/profiles/<name>` — a profile is a directory holding a manifest. */
 function profileDir(home: string, profile: string): string {
   return join(home, 'profiles', profile)
+}
+
+/**
+ * 剥离 UTF-8 BOM(U+FEFF):Windows 记事本等外部工具改写 package.json 时会写入 BOM,
+ * 而 dsh 内核 `JSON.parse` 不认 BOM,启动直接报
+ * `SyntaxError: Unexpected token '\uFEFF'`。启动前调用,带 BOM 则重写为无 BOM。
+ * @param file - 目标 JSON 文件(通常是 profile 的 package.json)。
+ * @returns 是否实际发生了剥离(文件存在且开头有 BOM 且重写成功)。
+ */
+export function stripBomIfPresent(file: string): boolean {
+  if (!existsSync(file)) return false
+  let raw: string
+  try {
+    raw = readFileSync(file, 'utf8')
+  } catch {
+    return false
+  }
+  if (!raw.startsWith('\uFEFF')) return false
+  try {
+    writeFileSync(file, raw.slice(1), 'utf8')
+  } catch {
+    return false
+  }
+  return true
 }
 
 /**
@@ -257,12 +281,19 @@ export async function addInstance(input: NewInstanceInput): Promise<LauncherConf
   }
   const base = sanitizeProfileBase((input.profile || '').trim() || cfg.profile || 'web')
   const profile = uniqueProfileName(base, home)
+  // 端口冲突兜底:指定端口若与其他实例重复,自动向上找空闲端口(语义同端口 0 的
+  // 「自动」),避免后启动者报「端口被占用」或把对方误判为外部实例。
+  let port = Number.isFinite(input.port) && input.port > 0 ? input.port : 0
+  if (port > 0) {
+    const taken = new Set(cfg.instances.map(i => i.port).filter(p => p > 0))
+    while (taken.has(port)) port++
+  }
   createProfile(home, profile, templateBundles(base))
   const inst: DshInstance = {
     id,
     name: (input.name || '').trim() || defaultName(cfg),
     profile,
-    port: Number.isFinite(input.port) && input.port > 0 ? input.port : 0,
+    port,
     autoStart: Boolean(input.autoStart),
     description: (input.description ?? '').trim(),
     enabled: true,

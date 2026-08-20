@@ -69,6 +69,8 @@ export function registerIpc(): void {
   ipcMain.handle('instances:remove', async (_e, id: string) => {
     await harness.stopInstance(String(id))
     const cfg = await instances.removeInstance(String(id))
+    // 同时清理该实例的嵌入式视图(隐藏的 WebContents 泄漏)。
+    dshview.removeDshView(String(id))
     broadcastInstances()
     return cfg
   })

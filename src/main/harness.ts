@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { createConnection } from 'node:net'
 import { getConfig } from './config'
-import { getInstance, getInstances, ensureWorkspace, instanceDshHome } from './instances'
+import { getInstance, getInstances, ensureWorkspace, instanceDshHome, stripBomIfPresent } from './instances'
 import { t } from './i18n'
 import { bundledEnv, resolveBundledDshBin, resolveBundledNode } from './runtime'
 import { broadcast } from './bus'
@@ -26,6 +26,12 @@ interface Runtime {
   portTimer: NodeJS.Timeout | null
   startTimer: NodeJS.Timeout | null
   stopping: boolean
+  /** 同步防并发双启动:startInstance 入口置位,函数返回/异常后清除。 */
+  starting: boolean
+  /** 主动停止完成的时间戳(ms);external 判定冷却期起点,0 表示未停止过。 */
+  stoppedAt: number
+  /** 跨 chunk 的行缓冲:stdout/stderr 分界处的半行在下一 chunk 续接,防止日志行被截断。 */
+  pending: { stdout: string; stderr: string }
   /** Actual bound port: the configured one, or parsed from dsh's log when the instance uses port 0. */
   effectivePort: number
   /** Last time the child produced any output (for the stuck-detection grace period). */
@@ -70,6 +76,9 @@ function ensureRuntime(id: string): Runtime {
       portTimer: null,
       startTimer: null,
       stopping: false,
+      starting: false,
+      stoppedAt: 0,
+      pending: { stdout: '', stderr: '' },
       effectivePort: inst?.port ?? 0,
       lastOutputAt: 0
     }
@@ -143,9 +152,12 @@ function parsePortFromLine(line: string): number | null {
 
 function chunkToLines(rt: Runtime, stream: 'stdout' | 'stderr'): (chunk: Buffer) => void {
   return (chunk: Buffer) => {
-    const text = chunk.toString('utf8')
-    // Split into lines but keep trailing partials? Simpler: emit each CR/LF-terminated line.
-    for (const line of text.split(/\r?\n/)) pushLine(rt, stream, line)
+    // 行缓冲:一个 chunk 里的半行可能在下个 chunk 续完,直接 split 会把一行拆成
+    // 两段错误日志。挂到 rt.pending,进程退出时统一 flush。
+    rt.pending[stream] += chunk.toString('utf8')
+    const lines = rt.pending[stream].split(/\r?\n/)
+    rt.pending[stream] = lines.pop() ?? ''
+    for (const line of lines) pushLine(rt, stream, line)
   }
 }
 
@@ -199,7 +211,19 @@ export async function startInstance(id: string): Promise<{ ok: boolean; error?: 
   const inst = getInstance(id)
   if (!inst) return { ok: false, error: t('实例不存在。', 'Instance not found.') }
   const rt = ensureRuntime(id)
+  // 同步防并发双启动:两处检查都在任何 await 之前完成;第二个并发调用看到
+  // rt.starting 立即被拒,杜绝「rt.child 尚未赋值 → 双 spawn → 首个进程泄漏」。
   if (rt.child) return { ok: false, error: t(`实例「${inst.name}」已在运行`, `Instance "${inst.name}" is already running`) }
+  if (rt.starting) return { ok: false, error: t(`实例「${inst.name}」正在启动中,请稍候`, `Instance "${inst.name}" is starting, please wait`) }
+  rt.starting = true
+  try {
+    return await startInstanceInner(inst, rt)
+  } finally {
+    rt.starting = false
+  }
+}
+
+async function startInstanceInner(inst: DshInstance, rt: Runtime): Promise<{ ok: boolean; error?: string }> {
   const cfg = getConfig()
   const home = instanceDshHome(inst)
   // 独立 home 缺失 → 快速失败(纯解析、不兜底,防止静默回退到共享 home 的隐蔽错位)。
@@ -212,6 +236,11 @@ export async function startInstance(id: string): Promise<{ ok: boolean; error?: 
     await ensureRuntimeLinks(home, inst.profile)
   } catch (e) {
     pushLine(rt, 'stderr', t(`[launcher] 运行时链接层自愈失败: ${String(e)}`, `[launcher] Failed to self-heal the runtime link layer: ${String(e)}`))
+  }
+  // 剥离 profile manifest 的 UTF-8 BOM:Windows 记事本等外部工具改写 package.json
+  // 时可能写入 BOM,dsh 内核 JSON.parse 不认 BOM 会启动即失败。启动前自愈,幂等。
+  if (stripBomIfPresent(join(home, 'profiles', inst.profile, 'package.json'))) {
+    pushLine(rt, 'stderr', t(`[launcher] 已修复 profile manifest 的 UTF-8 BOM: ${inst.profile}/package.json`, `[launcher] Stripped UTF-8 BOM from profile manifest: ${inst.profile}/package.json`))
   }
   let plan: LaunchPlan
   try {
@@ -279,6 +308,7 @@ export async function startInstance(id: string): Promise<{ ok: boolean; error?: 
 
   rt.child = proc
   rt.stopping = false
+  rt.stoppedAt = 0 // 新进程存活,external 判定冷却期结束
   rt.lastOutputAt = Date.now()
   patch(rt, { pid: proc.pid ?? null })
 
@@ -289,6 +319,13 @@ export async function startInstance(id: string): Promise<{ ok: boolean; error?: 
     patch(rt, { status: 'error', lastError: err.message })
   })
   proc.on('exit', (code, signal) => {
+    // 进程结束时 flush 行缓冲里未换行的尾行。
+    for (const s of ['stdout', 'stderr'] as const) {
+      if (rt.pending[s]) {
+        pushLine(rt, s, rt.pending[s])
+        rt.pending[s] = ''
+      }
+    }
     pushLine(rt, 'stderr', t(`[launcher] 进程退出 code=${code ?? 'null'} signal=${signal ?? 'none'}`, `[launcher] Process exited code=${code ?? 'null'} signal=${signal ?? 'none'}`))
     rt.child = null
     stopPortProbe(rt)
@@ -474,6 +511,9 @@ function delay(ms: number): Promise<void> {
 async function tickMonitor(rt: Runtime): Promise<void> {
   const port = rt.effectivePort
   if (port <= 0) return
+  // 主动停止后的冷却期:taskkill /T 异步释放端口,可能滞后数秒;此期间不把刚停止的
+  // 实例误判为「外部 DSH 实例」——否则点过停止,状态却跳成 external,看着像复活。
+  if (rt.stoppedAt !== 0 && Date.now() - rt.stoppedAt < 5000) return
   if (!rt.child) {
     const inUse = await portInUse(port)
     if (inUse) {
@@ -555,8 +595,12 @@ function stopRuntime(rt: Runtime): Promise<void> {
         patch(rt, { status: 'stopping', pid: null, ready: false })
         if (process.platform === 'win32') {
           const kill = spawn('taskkill', ['/F', '/T', '/PID', String(pid)], { windowsHide: true, stdio: 'ignore' })
-          kill.on('error', () => resolve())
-          kill.on('close', () => resolve())
+          const settle = (): void => {
+            rt.stoppedAt = Date.now()
+            resolve()
+          }
+          kill.on('error', settle)
+          kill.on('close', settle)
         } else {
           // Best-effort: the monitor flips back to 'stopped' once the port frees.
           try {
@@ -564,10 +608,12 @@ function stopRuntime(rt: Runtime): Promise<void> {
           } catch {
             /* ignore */
           }
+          rt.stoppedAt = Date.now()
           resolve()
         }
         return
       }
+      rt.stoppedAt = Date.now()
       patch(rt, { status: 'stopped', pid: null, ready: false })
       resolve()
       return
@@ -593,6 +639,7 @@ function stopRuntime(rt: Runtime): Promise<void> {
     const finish = (): void => {
       if (resolved) return
       resolved = true
+      rt.stoppedAt = Date.now()
       patch(rt, { status: 'stopped', pid: null, ready: false })
       resolve()
     }

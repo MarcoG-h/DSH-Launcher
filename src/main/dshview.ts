@@ -99,6 +99,24 @@ export function setDshSidebarWidth(width: number): void {
   relayout()
 }
 
+/**
+ * 移除某实例的嵌入式视图(实例删除时调用)。实例 id 是 UUID 不复用,不清理的话
+ * 隐藏视图会一直驻留,白占一个 WebContents。同时避免「删除的实例恰好是活动视图」
+ * 时残留的 activeId 指向已删除实例。
+ */
+export function removeDshView(instanceId: string): void {
+  const v = views.get(instanceId)
+  if (!v) return
+  if (activeId === instanceId) {
+    activeId = null
+    active = false
+  }
+  views.delete(instanceId)
+  loaded.delete(instanceId)
+  v.webContents.close()
+  relayout()
+}
+
 function relayout(): void {
   if (!win) return
   const [w, h] = win.getContentSize()

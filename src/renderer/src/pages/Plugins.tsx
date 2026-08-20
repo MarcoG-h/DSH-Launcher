@@ -524,7 +524,13 @@ function PluginDetailModal({
     setRemoving(true)
     setErr(null)
     try {
-      await api.removeFromLibrary(row.name)
+      const r = await api.removeFromLibrary(row.name)
+      // 主进程可能返回 ok:false(如 Windows 目录被运行中的实例占用)——此时展示
+      // 具体原因,不当作移除成功。
+      if (!r.ok) {
+        setErr(r.error ?? t('plugins.removeFailed'))
+        return
+      }
       onRemoved()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))

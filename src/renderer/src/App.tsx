@@ -166,7 +166,12 @@ function Shell(): JSX.Element {
       <Sidebar
         view={inDsh ? 'dsh' : page}
         setView={(v) => {
-          if (v === 'dsh') setCollapsed(true)
+          // Collapse the rail only when actually ENTERING the DSH view from
+          // elsewhere (startup, a nav click, a jump from a non-DSH page).
+          // Switching between two instances keeps the current rail state: the
+          // view is already 'dsh', and re-collapsing on every switch makes the
+          // sidebar useless when hopping between instances.
+          if (v === 'dsh' && v !== view) setCollapsed(true)
           setView(v)
         }}
         collapsed={collapsed}

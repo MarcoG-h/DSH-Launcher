@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, dirname, join, resolve, sep } from 'node:path'
 import * as yaml from 'js-yaml'
@@ -15,7 +15,9 @@ import type { CmdResult, InstalledPlugin, LocalPlugin, PluginCellStatus, PluginL
 
 function readJson(file: string): Record<string, unknown> | null {
   try {
-    return JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
+    // 剥 UTF-8 BOM:Windows 记事本等外部工具可能写入 BOM,JSON.parse 不认。
+    const raw = readFileSync(file, 'utf8').replace(/^\uFEFF/, '')
+    return JSON.parse(raw) as Record<string, unknown>
   } catch {
     return null
   }
@@ -646,6 +648,60 @@ export function repairProfile(home: string, profile: string): { ok: boolean; cha
 }
 
 /**
+ * 递归删除目录内所有符号链接/junction(Windows 上 rmSync 遇到 junction 常抛
+ * EPERM——junction 是重解析点,把它当目录枚举/删除会被系统拒绝)。先清链接,
+ * 再删实体目录。占用中的链接跳过,交给后续 rmSync 的重试处理。
+ */
+function removeLinksInside(dir: string): void {
+  let names: string[]
+  try {
+    names = readdirSync(dir)
+  } catch {
+    return
+  }
+  for (const name of names) {
+    const p = join(dir, name)
+    let st
+    try {
+      st = lstatSync(p)
+    } catch {
+      continue
+    }
+    if (st.isSymbolicLink()) {
+      try { unlinkSync(p) } catch { /* 占用中则留给 rmSync 重试 */ }
+    } else if (st.isDirectory()) {
+      removeLinksInside(p)
+    }
+  }
+}
+
+/**
+ * 健壮的目录删除(Windows):先清内部 junction/symlink,再带重试 rmSync;
+ * 仍被占用(如运行中的 dsh 实例持有插件文件句柄)时改名让原路径立即从本地库
+ * 消失,后台再清;改名也失败才抛错。
+ */
+function removeDirForce(dir: string): void {
+  if (!existsSync(dir)) return
+  removeLinksInside(dir)
+  try {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+    return
+  } catch {
+    // EPERM/EBUSY——目录可能被运行中的实例占用,走改名兜底。
+  }
+  const trash = `${dir}.deleting-${process.pid}-${Date.now()}`
+  try {
+    renameSync(dir, trash)
+    rmSync(trash, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  } catch {
+    throw new Error(t(
+      `目录被占用,无法删除 ${dir}。若插件正被运行中的实例加载,请先停止该实例再移除。`,
+      `Directory is locked and could not be removed: ${dir}. If the plugin is loaded by a running instance, stop it first.`
+    ))
+  }
+}
+
+/**
  * Remove a plugin from the local library entirely: uninstall it from every
  * instance's profile (so no `file:` dependency dangles into a deleted folder),
  * then delete its source from pluginDir. Returns the affected instance ids so
@@ -663,7 +719,13 @@ export async function removeFromLibrary(name: string): Promise<CmdResult> {
     const r = await remove(home, inst.profile, name)
     if (r.ok) affected.push(inst.id)
   }
-  if (entry) rmSync(entry.path, { recursive: true, force: true })
+  if (entry) {
+    try {
+      removeDirForce(entry.path)
+    } catch (e) {
+      return { ok: false, code: 1, error: e instanceof Error ? e.message : String(e), affected }
+    }
+  }
   // 插件已从本地库移除,连同它的显示名/备注一并清掉,
   // 避免「插件删了、名字还留在上面」的残留(此前推荐整合包功能遗留过这个问题)。
   if (cfg.pluginMeta?.[name]) setPluginMeta(name, { displayName: '', remark: '' })
