@@ -142,7 +142,7 @@ function createProfile(home: string, profile: string, bundles: string[]): void {
 }
 
 /** Ensure an arbitrary profile name is bootable: sanitize + create if missing (in the given home). */
-function ensureProfile(name: string, home: string): string {
+export function ensureProfile(name: string, home: string): string {
   const clean = sanitizeProfileBase(name)
   if (!existsSync(profileDir(home, clean))) createProfile(home, clean, templateBundles(clean))
   return clean

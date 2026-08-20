@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { createConnection } from 'node:net'
 import { getConfig } from './config'
-import { getInstance, getInstances, ensureWorkspace, instanceDshHome, stripBomIfPresent } from './instances'
+import { getInstance, getInstances, ensureWorkspace, instanceDshHome, stripBomIfPresent, ensureProfile } from './instances'
 import { t } from './i18n'
 import { bundledEnv, resolveBundledDshBin, resolveBundledNode } from './runtime'
 import { broadcast } from './bus'
@@ -241,6 +241,16 @@ async function startInstanceInner(inst: DshInstance, rt: Runtime): Promise<{ ok:
   // 时可能写入 BOM,dsh 内核 JSON.parse 不认 BOM 会启动即失败。启动前自愈,幂等。
   if (stripBomIfPresent(join(home, 'profiles', inst.profile, 'package.json'))) {
     pushLine(rt, 'stderr', t(`[launcher] 已修复 profile manifest 的 UTF-8 BOM: ${inst.profile}/package.json`, `[launcher] Stripped UTF-8 BOM from profile manifest: ${inst.profile}/package.json`))
+  }
+  // 确保 profile 目录物理存在:dsh 内核只对 web/headless 自动初始化,web-2 这类
+  // 名字在目录缺失时启动即报 "profile does not exist"(共享模式实例的目录可能因
+  // 手动清理/历史遗留而缺失)。启动前按模板补建,自愈。
+  const profileDirPath = join(home, 'profiles', inst.profile)
+  if (!existsSync(profileDirPath)) {
+    ensureProfile(inst.profile, home)
+    pushLine(rt, 'stderr', t(`[launcher] 检测到缺失的 profile,已自动补建: ${inst.profile}`, `[launcher] Missing profile detected; auto-created: ${inst.profile}`))
+  } else {
+    ensureProfile(inst.profile, home)
   }
   let plan: LaunchPlan
   try {
