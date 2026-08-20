@@ -58,6 +58,7 @@ the flexibility of the plugin ecosystem becomes something every user can reach.<
 | File | Description | Size |
 | --- | --- | --- |
 | [Installer exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v3.0.1/DSH.Launcher.Setup.3.0.1.exe) | NSIS installer; creates desktop / Start menu shortcuts automatically | ~100 MB |
+| [Simple exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v2.0.3/DSH.Launcher.Setup.2.0.3.exe) | Minimal version without multi-instance, for users running a single DSH | ~100 MB |
 
 More versions on the [Releases page](https://github.com/MarcoG-h/DSH-Launcher/releases).
 
