@@ -324,10 +324,9 @@ export async function installRuntime(): Promise<CmdResult> {
   // so the bundled dsh can boot (e.g. existing 22.14 installs self-heal on re-deploy).
   const MIN_NODE = '22.19.0'
   const ver = nodeVersionAtLeast(cfg.nodeVersion || '', MIN_NODE) ? cfg.nodeVersion : MIN_NODE
-  // dsh 不在安装包里自带,部署时从 registry 拉取。默认跟随最新稳定版(latest);
-  // 只在用户显式设置 dshVersion 时固定到指定版本。旧版本残留的默认值
-  // '0.1.0-rc.6' 视为「未指定」,让老用户直接跟随最新。
-  const dshVer = cfg.dshVersion && cfg.dshVersion !== '0.1.0-rc.6' ? cfg.dshVersion : 'latest'
+  // dsh 不在安装包里自带,部署时从 registry 拉取。始终实时抓取 npm 最新稳定版:
+  // latest 标签每次由 pnpm 现场解析,不依赖任何固定版本号——固定版本会错过新版。
+  const dshVer = 'latest'
   const dir = nodeDir()
   const stage = join(root, '.node-stage')
   const zip = join(root, `node-v${ver}-win-x64.zip`)
@@ -457,7 +456,8 @@ export async function updateRuntime(): Promise<CmdResult> {
     taskDone(label, 1)
     return { ok: false, code: 1, error: t('运行环境未安装', 'Runtime not installed') }
   }
-  const dshVer = cfg.dshVersion && cfg.dshVersion !== '0.1.0-rc.6' ? cfg.dshVersion : 'latest'
+  // 实时抓取 npm 最新稳定版(latest 由 pnpm 每次现场解析),不按固定版本号判断。
+  const dshVer = 'latest'
   const pnpm = join(nodeDir(), 'pnpm.cmd')
   if (!existsSync(pnpm)) {
     taskLine(label, t('[runtime] 未找到 pnpm,请先重新「一键安装运行环境」。', '[runtime] pnpm not found — please re-run "Install runtime" first.'), 'stderr')
