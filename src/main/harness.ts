@@ -206,9 +206,10 @@ function launchPlan(cfg: LauncherConfig, inst: DshInstance): LaunchPlan {
   // profiles are auto-named (`web-2`, …), so the flag is required everywhere.
   const inner = [...cfg.launchArgs, '--profile', inst.profile || 'web', '--port', String(inst.port)]
   // --no-open:新版 dsh(rc.7+)启动 web 后默认会用系统默认浏览器打开自身地址,
-  // launcher 已有内嵌视图,不需要浏览器弹出。仅当 dsh 支持该参数时传,旧版不传
-  // (否则报 unknown option);BROWSER=false 对所有版本兜底(open 包执行 false 失败)。
-  if (dshSupportsNoOpen(dshVersionOf(cfg))) inner.push('--no-open')
+  // launcher 已有内嵌视图,不需要浏览器弹出。该参数只在**内置(npm 包)**dsh 存在:
+  // 源码版本地 harness 的 rc.7 编译产物不含它,传了会报 unknown option。所以仅
+  // bundled 模式按版本传;BROWSER=false 对所有版本兜底(open 包执行 false 失败,不开浏览器)。
+  if (cfg.installMode === 'bundled' && dshSupportsNoOpen(dshVersionOf(cfg))) inner.push('--no-open')
   // 实例的 DSH_HOME:独立 home(inst.dshHome)或共享 cfg.dshHome。显式钉住 env,
   // 防系统级 $DSH_HOME 环境变量漂移(共享实例此前未注入,行为是隐式继承)。
   const home = instanceDshHome(inst)
