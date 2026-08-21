@@ -184,7 +184,10 @@ function launchPlan(cfg: LauncherConfig, inst: DshInstance): LaunchPlan {
   // default instance too. A bare positional would be handed to the booted app
   // and the CLI would error with "--profile <name> is required"; instance
   // profiles are auto-named (`web-2`, …), so the flag is required everywhere.
-  const inner = [...cfg.launchArgs, '--profile', inst.profile || 'web', '--port', String(inst.port)]
+  // --no-open:新版 dsh(rc.7+)启动 web 后默认会用系统默认浏览器打开自身地址,
+  // launcher 已有内嵌视图,不需要浏览器弹出。该 flag 对非 web profile 无副作用
+  // (dsh 的 allowUnknownOption 会 pass-through)。
+  const inner = [...cfg.launchArgs, '--profile', inst.profile || 'web', '--port', String(inst.port), '--no-open']
   // 实例的 DSH_HOME:独立 home(inst.dshHome)或共享 cfg.dshHome。显式钉住 env,
   // 防系统级 $DSH_HOME 环境变量漂移(共享实例此前未注入,行为是隐式继承)。
   const home = instanceDshHome(inst)
@@ -192,18 +195,19 @@ function launchPlan(cfg: LauncherConfig, inst: DshInstance): LaunchPlan {
     const node = resolveBundledNode()
     const bin = resolveBundledDshBin()
     if (!node || !bin) throw new Error(t('内置运行环境未安装 — 请到「设置 → 运行环境」点击「一键安装运行环境」。', 'Built-in runtime not installed — go to Settings → Runtime and click "Install runtime".'))
+    // BROWSER=false:阻止 dsh 服务端启动后自动打开系统浏览器(launcher 已有内嵌视图)。
     return {
       cmd: node,
       args: inner,
       cwd: ensureWorkspace(inst),
-      envPatch: { ...bundledEnv(), DSH_HOME: home }
+      envPatch: { ...bundledEnv(), DSH_HOME: home, BROWSER: 'false' }
     }
   }
   return {
     cmd: cfg.nodePath,
     args: resolveScriptArgs(inner, cfg.harnessRepo),
     cwd: ensureWorkspace(inst),
-    envPatch: { DSH_HOME: home }
+    envPatch: { DSH_HOME: home, BROWSER: 'false' }
   }
 }
 
