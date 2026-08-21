@@ -8,7 +8,7 @@
 // wrong coordinates. A WebContentsView is a first-class child of the window's
 // content view, so keyboard focus and IME work natively.
 
-import { WebContentsView, shell, type BrowserWindow, type WebContents } from 'electron'
+import { WebContentsView, type BrowserWindow, type WebContents } from 'electron'
 import { getState } from './harness'
 
 const SIDEBAR_EXPANDED = 212
@@ -87,21 +87,6 @@ function ensureViewFor(instanceId: string): WebContentsView | null {
     })
     win.contentView.addChildView(v)
     views.set(instanceId, v)
-    // 拦截 window.open:内嵌 DSH 视图不应自行弹窗/弹浏览器。回环地址(例如新版
-    // dsh 启动完成后自动打开自身端口地址)一律拦掉——launcher 已有内嵌视图;
-    // 用户主动点击的外部链接才交给系统默认浏览器。
-    v.webContents.setWindowOpenHandler(({ url }) => {
-      try {
-        const u = new URL(url)
-        const isLoopback = u.hostname === '127.0.0.1' || u.hostname === 'localhost' || u.hostname === '::1'
-        if ((u.protocol === 'http:' || u.protocol === 'https:') && !isLoopback) {
-          shell.openExternal(url)
-        }
-      } catch {
-        /* invalid URL — ignore */
-      }
-      return { action: 'deny' }
-    })
     // A fresh view lands on top of the existing stack — let the orb move back up.
     onViewAdded?.()
   }
