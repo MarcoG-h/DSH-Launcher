@@ -3,13 +3,13 @@
 // in parallel; each has its own state/log, port probe, and external monitor.
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { createConnection } from 'node:net'
 import { getConfig } from './config'
 import { getInstance, getInstances, ensureWorkspace, instanceDshHome, stripBomIfPresent, ensureProfile } from './instances'
 import { t } from './i18n'
-import { bundledEnv, resolveBundledDshBin, resolveBundledNode } from './runtime'
+import { bundledEnv, currentDshVersion, resolveBundledDshBin, resolveBundledNode } from './runtime'
 import { broadcast } from './bus'
 import { ensureRuntimeLinks } from './plugins'
 import type { DshInstance, HarnessState, LauncherConfig, LogLine } from '../shared/types'
@@ -177,6 +177,26 @@ function resolveScriptArgs(args: string[], base: string): string[] {
   })
 }
 
+/** 当前运行中的 dsh 版本:内置(bundled)读 .dsh-runtime 安装版本;源码版读 harness 仓库版本。 */
+function dshVersionOf(cfg: LauncherConfig): string | null {
+  if (cfg.installMode === 'bundled') return currentDshVersion()
+  try {
+    const p = join(cfg.harnessRepo, 'package.json')
+    if (!existsSync(p)) return null
+    return String((JSON.parse(readFileSync(p, 'utf8')) as { version?: unknown }).version ?? '')
+  } catch {
+    return null
+  }
+}
+
+/** --no-open 参数是 dsh rc.7+ 新增的;更早版本不认识它,传了会报 unknown option。 */
+function dshSupportsNoOpen(version: string | null): boolean {
+  if (!version) return false
+  const m = /rc\.(\d+)/.exec(version)
+  const rc = m ? Number(m[1]) : 0
+  return rc >= 7
+}
+
 /** Decide how to launch dsh for one instance based on the install mode. */
 function launchPlan(cfg: LauncherConfig, inst: DshInstance): LaunchPlan {
   // dsh's CLI boots any named profile via `--profile <name>` — the `web`
@@ -184,10 +204,11 @@ function launchPlan(cfg: LauncherConfig, inst: DshInstance): LaunchPlan {
   // default instance too. A bare positional would be handed to the booted app
   // and the CLI would error with "--profile <name> is required"; instance
   // profiles are auto-named (`web-2`, …), so the flag is required everywhere.
+  const inner = [...cfg.launchArgs, '--profile', inst.profile || 'web', '--port', String(inst.port)]
   // --no-open:新版 dsh(rc.7+)启动 web 后默认会用系统默认浏览器打开自身地址,
-  // launcher 已有内嵌视图,不需要浏览器弹出。该 flag 对非 web profile 无副作用
-  // (dsh 的 allowUnknownOption 会 pass-through)。
-  const inner = [...cfg.launchArgs, '--profile', inst.profile || 'web', '--port', String(inst.port), '--no-open']
+  // launcher 已有内嵌视图,不需要浏览器弹出。仅当 dsh 支持该参数时传,旧版不传
+  // (否则报 unknown option);BROWSER=false 对所有版本兜底(open 包执行 false 失败)。
+  if (dshSupportsNoOpen(dshVersionOf(cfg))) inner.push('--no-open')
   // 实例的 DSH_HOME:独立 home(inst.dshHome)或共享 cfg.dshHome。显式钉住 env,
   // 防系统级 $DSH_HOME 环境变量漂移(共享实例此前未注入,行为是隐式继承)。
   const home = instanceDshHome(inst)
