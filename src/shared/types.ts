@@ -189,6 +189,7 @@ export type LauncherEvent =
   | { type: 'instances'; instances: DshInstance[]; activeInstanceId: string }
   | { type: 'popup'; instanceId: string; open: boolean }
   | { type: 'dsh-update'; latest: string | null; current: string | null }
+  | { type: 'launcher-update'; latest: string | null; current: string; url: string | null; update: boolean }
 
 export interface BootstrapState {
   /** state per instance id. */

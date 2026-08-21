@@ -109,6 +109,8 @@ if (!gotTheLock) {
     ensureShortcuts()
     // 后台检查官方 dsh 是否有新版本(不阻塞启动,网络失败静默)。结果广播给 UI。
     void runtime.checkDshUpdate().then((r) => broadcast({ type: 'dsh-update', latest: r.latest, current: r.current }))
+    // 提示式更新:后台检查 DSH-Launcher 自身是否有新版 Release(网络失败静默)。
+    void runtime.checkLauncherUpdate().then((r) => broadcast({ type: 'launcher-update', latest: r.latest, current: r.current, url: r.url, update: r.update }))
     // autoStartOnLaunch (Settings): start every instance flagged autoStart as
     // soon as the app boots, before the window is created, so they boot in
     // parallel with the startup splash — by the time the animation ends, dsh is

@@ -1182,6 +1182,7 @@ export async function downloadHarness(): Promise<CmdResult> {
     taskDone(label, 1)
     return { ok: false, code: null, error: git.error }
   }
+  taskProgress(label, 0.1, t('拉取最新代码…', 'Fetching latest code…'))
   const gitEnv = gitEnvFor(git.exe)
 
   if (isIncompleteGitDir(target)) rmSync(target, { recursive: true, force: true })
@@ -1202,6 +1203,7 @@ export async function downloadHarness(): Promise<CmdResult> {
     }
   }
 
+  taskProgress(label, 0.45, t('代码已就绪,安装依赖…', 'Code ready, installing dependencies…'))
   taskLine(label, t('[download] 安装依赖 (pnpm install)…', '[download] Installing dependencies (pnpm install)…'))
   const install = await pnpmCmd(['install'], target, 'repair')
   if (!install.ok) {

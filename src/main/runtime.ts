@@ -2,6 +2,7 @@
 // install under runtimeRoot (~/.dsh-runtime). Target machines need no Node.js,
 // no pnpm, and no harness source checkout.
 
+import { app } from 'electron'
 import { spawn } from 'node:child_process'
 import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { get as httpsGet } from 'node:https'
@@ -96,6 +97,66 @@ export async function checkDshUpdate(): Promise<DshUpdateCheck> {
   const latest = await latestDshVersion()
   const current = currentDshVersion()
   return { latest, current, update: latest !== null && current !== null && latest !== current }
+}
+
+/** 比较语义化版本 a 与 b:返回正数(a>b) / 0 / 负数(a<b)。 */
+function compareSemver(a: string, b: string): number {
+  const pa = a.replace(/^v/, '').split('.').map((x) => Number(x) || 0)
+  const pb = b.replace(/^v/, '').split('.').map((x) => Number(x) || 0)
+  for (let i = 0; i < 3; i++) {
+    const x = pa[i] ?? 0
+    const y = pb[i] ?? 0
+    if (x !== y) return x - y
+  }
+  return 0
+}
+
+/** 启动器(DSH-Launcher)自身最新版 vs 当前版本。 */
+export interface LauncherUpdateCheck {
+  latest: string | null
+  current: string
+  url: string | null
+  update: boolean
+}
+
+/**
+ * 查询 GitHub 上 DSH-Launcher 的最新 Release,与当前运行版本对比。提示式更新:
+ * 网络失败/查不到时静默返回(update=false),不影响使用;UI 只在有新版本时提示
+ * 用户点击下载,不自动安装(免签名、免下载通道问题)。
+ */
+export async function checkLauncherUpdate(timeoutMs = 8000): Promise<LauncherUpdateCheck> {
+  const current = app.getVersion()
+  const remote = await new Promise<{ tag: string | null; url: string | null }>((resolve) => {
+    const req = httpsGet(
+      'https://api.github.com/repos/MarcoG-h/DSH-Launcher/releases/latest',
+      { timeout: timeoutMs, headers: { 'User-Agent': 'DSH-Launcher' } },
+      (res) => {
+        let body = ''
+        res.setEncoding('utf8')
+        res.on('data', (c) => { body += c })
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(body) as { tag_name?: unknown; html_url?: unknown }
+            resolve({
+              tag: typeof data.tag_name === 'string' ? data.tag_name : null,
+              url: typeof data.html_url === 'string' ? data.html_url : null
+            })
+          } catch {
+            resolve({ tag: null, url: null })
+          }
+        })
+      },
+    )
+    req.on('timeout', () => { req.destroy(); resolve({ tag: null, url: null }) })
+    req.on('error', () => resolve({ tag: null, url: null }))
+  })
+  const latest = remote.tag ? remote.tag.replace(/^v/, '') : null
+  return {
+    latest,
+    current,
+    url: remote.url,
+    update: latest !== null && compareSemver(latest, current) > 0
+  }
 }
 
 /** Compare dotted version strings: returns true when a >= b (missing parts = 0). */
@@ -404,9 +465,24 @@ export async function updateRuntime(): Promise<CmdResult> {
     return { ok: false, code: 1, error: t('运行环境缺少 pnpm,请重新一键安装', 'Runtime is missing pnpm — re-run one-click install') }
   }
   taskLine(label, t(`[runtime] 升级 @deepseek-ai/dsh@${dshVer}(不触碰 ~/.dsh 的第三方插件)…`, `[runtime] Upgrading @deepseek-ai/dsh@${dshVer} (third-party plugins in ~/.dsh are untouched)…`))
-  const r = await runAsync(pnpm, ['add', `@deepseek-ai/dsh@${dshVer}`, `--registry=${REGISTRY}`, '--config.strictDepBuilds=false'], dshInstallDir(), label, process.platform === 'win32')
-  if (!r.ok) return r
-  taskLine(label, t('[runtime] ✔ 内置 dsh 已升级', '[runtime] ✔ Built-in dsh upgraded'))
-  taskDone(label, 0)
-  return { ok: true, code: 0 }
+  // 带百分比的进度条:pnpm 下载/安装期间定时递增(0.1→0.9),让进度条持续走动;
+  // 完成后 taskDone(0) 会把进度收束到 100%。
+  taskProgress(label, 0.1, t('开始升级…', 'Starting upgrade…'))
+  let progress = 0.1
+  const tick = setInterval(() => {
+    progress = Math.min(0.9, progress + 0.05)
+    taskProgress(label, progress, t(`安装中…(${Math.round(progress * 100)}%)`, `Installing… (${Math.round(progress * 100)}%)`))
+  }, 2500)
+  try {
+    const r = await runAsync(pnpm, ['add', `@deepseek-ai/dsh@${dshVer}`, `--registry=${REGISTRY}`, '--config.strictDepBuilds=false'], dshInstallDir(), label, process.platform === 'win32')
+    if (!r.ok) {
+      taskDone(label, r.code ?? 1)
+      return r
+    }
+    taskLine(label, t('[runtime] ✔ 内置 dsh 已升级', '[runtime] ✔ Built-in dsh upgraded'))
+    taskDone(label, 0)
+    return { ok: true, code: 0 }
+  } finally {
+    clearInterval(tick)
+  }
 }

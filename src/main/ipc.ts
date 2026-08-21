@@ -166,7 +166,17 @@ export function registerIpc(): void {
     }
   }
   ipcMain.handle('runtime:install', busyGuard(runtime.installRuntime))
-  ipcMain.handle('runtime:update', busyGuard(runtime.updateRuntime))
+  ipcMain.handle('runtime:update', busyGuard(async () => {
+    // 更新前检测运行中的实例:正在被使用的 dsh 文件(在 .dsh-runtime 下)替换会被
+    // 进程占用而失败,也可能让运行中的实例崩溃。UI 会先弹窗自动停止,这里是兜底。
+    for (const inst of instances.getInstances()) {
+      const st = harness.getState(inst.id)
+      if (st.status === 'running' || st.status === 'external') {
+        return { ok: false, code: 1, error: t(`实例「${inst.name}」正在运行 — 请先关闭所有实例再更新 dsh`, `Instance "${inst.name}" is running — stop all instances before updating dsh`) }
+      }
+    }
+    return runtime.updateRuntime()
+  }))
 
   ipcMain.handle('balance:get', () => balance.getBalance())
 

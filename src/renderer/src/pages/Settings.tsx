@@ -26,7 +26,7 @@ function Field({ label, value, onChange, mono = true, hint }: { label: string; v
 }
 
 export function Settings(): JSX.Element {
-  const { config, saveConfig, tasks, refresh, dshUpdate } = useHarness()
+  const { config, saveConfig, tasks, refresh, dshUpdate, states, instances } = useHarness()
   const { t, lang } = useI18n()
   const [tab, setTab] = useState<'dsh' | 'system'>('dsh')
   const [form, setForm] = useState<Partial<LauncherConfig>>({})
@@ -89,11 +89,23 @@ export function Settings(): JSX.Element {
     }
   }
 
-  const doUpdateRuntime = async (): Promise<void> => {
+  const doUpdateDsh = async (): Promise<void> => {
     setRtBusy('update')
     try {
-      await api.updateRuntime()
+      // 更新 dsh 前检测运行中的实例:弹窗确认,确认后自动关闭再更新。
+      // bundled → 更新内置 dsh;source → 拉取源码版最新(git pull)。
+      const running = instances.filter((inst) => {
+        const st = states[inst.id]?.status
+        return st === 'running' || st === 'external'
+      })
+      if (running.length > 0) {
+        const ok = window.confirm(t('settings.updateCloseInstancesConfirm', { count: running.length }))
+        if (!ok) return
+        for (const inst of running) await api.stopInstance(inst.id)
+      }
+      const r = isBundled ? await api.updateRuntime() : await api.downloadHarness()
       await refresh()
+      setRtDone(r.ok)
     } finally {
       setRtBusy(null)
     }
@@ -170,8 +182,8 @@ export function Settings(): JSX.Element {
               <button className="btn btn-primary shrink-0" disabled={rtBusy !== null} onClick={() => void doInstallRuntime()}>
                 <DownloadIcon /> {rtBusy === 'install' ? t('settings.deploying') : t('settings.deployBtn')}
               </button>
-              <button className="btn btn-ghost shrink-0" disabled={rtBusy !== null} onClick={() => void doUpdateRuntime()}>
-                <RefreshIcon /> {rtBusy === 'update' ? t('settings.updating') : t('settings.updateBtn')}
+              <button className="btn btn-ghost shrink-0" disabled={rtBusy !== null} onClick={() => void doUpdateDsh()}>
+                <RefreshIcon /> {rtBusy === 'update' ? t('settings.updating') : (isBundled ? t('settings.updateBtn') : t('settings.updateSourceBtn'))}
               </button>
             </div>
           </div>

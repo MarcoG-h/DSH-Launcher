@@ -42,6 +42,9 @@ export default function OrbWidget(): JSX.Element {
   }
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+    // 只响应左键:右键不启动拖拽/点击流程(否则右键松开会触发 orbClick 展开菜单),
+    // 交给 webContents 的原生 context-menu 弹快捷实例切换列表。
+    if (e.button !== 0) return
     e.preventDefault()
     ball.current?.setPointerCapture(e.pointerId)
     start.current = { x: e.clientX, y: e.clientY, t: Date.now() }

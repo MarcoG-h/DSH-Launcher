@@ -38,6 +38,8 @@ interface HarnessContextValue {
   dismissError: () => void
   /** 官方 dsh 最新版 vs 当前内置版(启动时后台检查;未查到/未内置时为 null) */
   dshUpdate: { latest: string | null; current: string | null; update: boolean } | null
+  /** DSH-Launcher 自身新版 Release 提示(启动时后台检查) */
+  launcherUpdate: { latest: string | null; current: string; url: string | null; update: boolean } | null
 }
 
 const HarnessContext = createContext<HarnessContextValue | null>(null)
@@ -59,6 +61,7 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
   const [runningTasks, setRunningTasks] = useState<string[]>([])
   const [actionError, setActionError] = useState<string | null>(null)
   const [dshUpdate, setDshUpdate] = useState<{ latest: string | null; current: string | null; update: boolean } | null>(null)
+  const [launcherUpdate, setLauncherUpdate] = useState<{ latest: string | null; current: string; url: string | null; update: boolean } | null>(null)
   const pluginsVersion = useRef(0)
 
   const reloadPlugins = useCallback(() => {
@@ -101,6 +104,8 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
         setPoppedOut((prev) => ({ ...prev, [e.instanceId]: e.open }))
       } else if (e.type === 'dsh-update') {
         setDshUpdate({ latest: e.latest, current: e.current, update: e.latest !== null && e.current !== null && e.latest !== e.current })
+      } else if (e.type === 'launcher-update') {
+        setLauncherUpdate({ latest: e.latest, current: e.current, url: e.url, update: e.update })
       } else if (e.type === 'task') {
         const t = e.task
         setTasks((prev) => {
@@ -229,7 +234,8 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
         reloadPlugins,
         actionError,
         dismissError,
-        dshUpdate
+        dshUpdate,
+        launcherUpdate
       }}
     >
       {children}

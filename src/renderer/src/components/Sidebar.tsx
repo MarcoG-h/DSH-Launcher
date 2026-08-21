@@ -47,7 +47,7 @@ const STATUS_PULSE: Record<string, boolean> = {
 }
 
 export function Sidebar({ view, setView, collapsed, setCollapsed, width }: SidebarProps): JSX.Element {
-  const { state, config, runningTasks, instances, states, activeInstanceId, poppedOut, setActiveInstance } = useHarness()
+  const { state, config, runningTasks, instances, states, activeInstanceId, poppedOut, setActiveInstance, launcherUpdate } = useHarness()
   const [theme, toggleTheme] = useTheme()
   const { lang, t, setLang, statusLabel } = useI18n()
   // Hidden instances stay out of the sidebar — manage them from the Instances page.
@@ -250,6 +250,19 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
       {/* Footer — hidden in the DSH rail */}
       {!dshRail && (
       <div className="px-3 py-3 border-t space-y-2 shrink-0" style={{ borderColor: 'var(--border)' }}>
+        {/* 提示式更新:检测到 DSH-Launcher 新版本时提示,点击打开 GitHub Release 下载页 */}
+        {launcherUpdate?.update && launcherUpdate.url && (
+          <a
+            href={launcherUpdate.url}
+            target="_blank"
+            rel="noreferrer"
+            className="block rounded-lg px-3 py-2 text-[12px] font-medium leading-snug cursor-pointer select-none"
+            style={{ color: 'var(--accent)', background: 'var(--accent-soft)', border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)' }}
+            title={t('sidebar.launcherUpdateHint')}
+          >
+            ↑ {t('sidebar.launcherUpdate', { latest: launcherUpdate.latest ?? '' })}
+          </a>
+        )}
         {runningTasks.length > 0 && (
           <div
             className="text-[11px] mono text-center"

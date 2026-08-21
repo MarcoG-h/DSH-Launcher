@@ -8,10 +8,14 @@
 // the DSH view is itself a native child view drawn above the launcher window's
 // renderer — ordinary DOM content can never float over it.
 
-import { WebContentsView, type BrowserWindow, type WebContents } from 'electron'
+import { Menu, WebContentsView, type BrowserWindow, type WebContents } from 'electron'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { broadcast } from './bus'
 import * as dshview from './dshview'
+import * as harness from './harness'
+import * as instances from './instances'
+import { t } from './i18n'
 import { preloadPath } from './preload'
 
 /** Size of the orb view (the ball inside is smaller, leaving room for its shadow). */
@@ -81,9 +85,41 @@ function ensure(): WebContentsView {
     orb.webContents.on('preload-error', (_e, p, err) => {
       console.log(`[orb] preload-error: ${p} ${err}`)
     })
+    // 右键悬浮球 → 快捷实例切换列表。浮球是纯展示层(内部没有可交互内容),
+    // 任何右键都视为「在球上」,弹出实例菜单。
+    orb.webContents.on('context-menu', () => {
+      showInstanceSwitcher()
+    })
     loadOrb(orb.webContents)
   }
   return orb!
+}
+
+/**
+ * 右键悬浮球弹出的快捷实例切换菜单:列出所有实例,当前活动的打勾,点击即切换
+ * (设置 activeInstanceId 并广播,renderer 收到后切换内嵌 DSH 视图)。
+ */
+function showInstanceSwitcher(): void {
+  if (!win) return
+  const cfgActive = instances.getActiveInstance().id
+  const menu = Menu.buildFromTemplate([
+    { label: t('切换实例', 'Switch instance'), enabled: false },
+    { type: 'separator' },
+    ...instances.getInstances().map((inst) => {
+      const st = harness.getState(inst.id).status
+      const running = st === 'running' || st === 'external'
+      return {
+        label: `${inst.name}${running ? '  ●' : ''}`,
+        type: 'checkbox' as const,
+        checked: inst.id === cfgActive,
+        click: (): void => {
+          instances.setActiveInstance(inst.id)
+          broadcast({ type: 'instances', instances: instances.getInstances(), activeInstanceId: inst.id })
+        }
+      }
+    })
+  ])
+  menu.popup({ window: win })
 }
 
 /** Tear down a dead orb view so the next ensure() builds a fresh one. */
