@@ -189,12 +189,19 @@ function dshVersionOf(cfg: LauncherConfig): string | null {
   }
 }
 
-/** --no-open 参数是 dsh rc.7+ 新增的;更早版本不认识它,传了会报 unknown option。 */
+/**
+ * --no-open 参数存在于 dsh 0.1.0-rc.7 及之后(含 0.1.1-* 新版本线)。
+ * 注意 0.1.1-rc.2 的 rc 号是 2,不能用「rc>=7」判断,要按主版本比较:
+ * patch>=1(0.1.1+)或 (patch==0 && rc>=7)。
+ */
 function dshSupportsNoOpen(version: string | null): boolean {
   if (!version) return false
-  const m = /rc\.(\d+)/.exec(version)
-  const rc = m ? Number(m[1]) : 0
-  return rc >= 7
+  const m = /^(\d+)\.(\d+)\.(\d+)(?:-rc\.(\d+))?/.exec(version.trim())
+  if (!m) return false
+  const [, , , patch, rc] = m
+  const n = (x?: string): number => Number(x ?? 0)
+  if (n(patch) >= 1) return true
+  return n(rc) >= 7
 }
 
 /** Decide how to launch dsh for one instance based on the install mode. */
@@ -205,10 +212,10 @@ function launchPlan(cfg: LauncherConfig, inst: DshInstance): LaunchPlan {
   // and the CLI would error with "--profile <name> is required"; instance
   // profiles are auto-named (`web-2`, …), so the flag is required everywhere.
   const inner = [...cfg.launchArgs, '--profile', inst.profile || 'web', '--port', String(inst.port)]
-  // --no-open:新版 dsh(rc.7+)启动 web 后默认会用系统默认浏览器打开自身地址,
-  // launcher 已有内嵌视图,不需要浏览器弹出。该参数只在**内置(npm 包)**dsh 存在:
-  // 源码版本地 harness 的 rc.7 编译产物不含它,传了会报 unknown option。所以仅
-  // bundled 模式按版本传;BROWSER=false 对所有版本兜底(open 包执行 false 失败,不开浏览器)。
+  // --no-open:新版 dsh(0.1.0-rc.7+,含 0.1.1-*)启动 web 后默认会用系统浏览器打开
+  // 自身地址,launcher 已有内嵌视图,必须禁用。该参数只存在于**内置(npm 包)**dsh:
+  // 源码版本地 harness 不含它(传了报 unknown option,且本地 harness 不自动开浏览器)。
+  // 所以仅 bundled 模式按版本传。
   if (cfg.installMode === 'bundled' && dshSupportsNoOpen(dshVersionOf(cfg))) inner.push('--no-open')
   // 实例的 DSH_HOME:独立 home(inst.dshHome)或共享 cfg.dshHome。显式钉住 env,
   // 防系统级 $DSH_HOME 环境变量漂移(共享实例此前未注入,行为是隐式继承)。
@@ -217,19 +224,18 @@ function launchPlan(cfg: LauncherConfig, inst: DshInstance): LaunchPlan {
     const node = resolveBundledNode()
     const bin = resolveBundledDshBin()
     if (!node || !bin) throw new Error(t('内置运行环境未安装 — 请到「设置 → 运行环境」点击「一键安装运行环境」。', 'Built-in runtime not installed — go to Settings → Runtime and click "Install runtime".'))
-    // BROWSER=false:阻止 dsh 服务端启动后自动打开系统浏览器(launcher 已有内嵌视图)。
     return {
       cmd: node,
       args: inner,
       cwd: ensureWorkspace(inst),
-      envPatch: { ...bundledEnv(), DSH_HOME: home, BROWSER: 'false' }
+      envPatch: { ...bundledEnv(), DSH_HOME: home }
     }
   }
   return {
     cmd: cfg.nodePath,
     args: resolveScriptArgs(inner, cfg.harnessRepo),
     cwd: ensureWorkspace(inst),
-    envPatch: { DSH_HOME: home, BROWSER: 'false' }
+    envPatch: { DSH_HOME: home }
   }
 }
 
