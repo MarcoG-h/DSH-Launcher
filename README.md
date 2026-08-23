@@ -61,7 +61,7 @@ DSH Web 直接内嵌在客户端窗口里。</p>
 
 更多版本见 [Releases 页面](https://github.com/MarcoG-h/DSH-Launcher/releases)。
 
-另提供专业版：[专业版DSH-Launcher](https://github.com/baihejiangnan/deepseek-harness-desktop)（不含安装辅助）
+另提供专业版：[专业版DSH-Launcher](https://github.com/baihejiangnan/deepseek-harness-desktop)
 
 📺 快速上手视频教程:[BiliBili](https://www.bilibili.com/video/BV1BMbR64EoQ/?vd_source=ed1422074bd9beff1e11e3fba3c0fff8)
 
