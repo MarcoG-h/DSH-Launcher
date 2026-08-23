@@ -3,7 +3,7 @@
 // workspace); this module is the read/write surface and the session-isolation
 // helpers. The spawned processes themselves are managed by harness.ts.
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { getConfig, setConfig } from './config'
@@ -334,12 +334,30 @@ export function updateInstance(id: string, patch: Partial<Omit<DshInstance, 'id'
 export async function removeInstance(id: string): Promise<LauncherConfig> {
   const cfg = getConfig()
   if (cfg.instances.length <= 1) return cfg
-  if (!cfg.instances.some(i => i.id === id)) return cfg
+  const inst = cfg.instances.find(i => i.id === id)
+  if (!inst) return cfg
   const instances = cfg.instances.filter(i => i.id !== id)
   const activeInstanceId =
     cfg.activeInstanceId === id
       ? (instances.find(i => i.enabled !== false) ?? instances[0]).id
       : cfg.activeInstanceId
+
+  // —— 真正清理磁盘(仅删「该实例专属、且确认无共享」的数据,防误删其余实例) ——
+  try {
+    // 1) workspace(实例专属 runtimeRoot/workspaces/<id>),删除绝对安全。
+    if (inst.workspace) rmSync(inst.workspace, { recursive: true, force: true })
+    // 2) profile 目录:仅当「没有其他实例」在该 home 使用同名 profile 时才删。
+    //    共享 home 下多个实例可能共用同一 profile,删了会让其余实例 boot 失败——
+    //    这是此前误删导致全部实例损坏的根源。
+    const home = instanceDshHome(inst)
+    const sharedElsewhere = instances.some(o => instanceDshHome(o) === home && o.profile === inst.profile)
+    if (!sharedElsewhere) rmSync(profileDir(home, inst.profile), { recursive: true, force: true })
+    // 3) 独立 home(实例专属 runtimeRoot/homes/<id>):UI 删除前已二次确认,此处直接清理。
+    if (inst.dshHome) rmSync(inst.dshHome, { recursive: true, force: true })
+  } catch {
+    // 删除失败(文件被占用等)不阻断配置移除——残留由用户自行决定是否手动清理。
+  }
+
   return setConfig({ instances, activeInstanceId })
 }
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { LogLine } from '../lib/api'
+import { api, type LogLine } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
 import { useI18n } from '../i18n'
 import { CopyButton } from './CopyButton'
@@ -73,7 +73,14 @@ export function LogConsole({ height = '520px' }: { height?: string }): React.JSX
         </span>
         <div className="ml-auto flex items-center gap-2">
           <CopyButton text={lines.map((l) => `[${l.instanceName}] ${l.line}`).join('\n')} title={t('common.copyAll')} />
-          <button className="btn btn-ghost btn-sm" onClick={() => { setClearedAt(Date.now()) }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => {
+              // 真正清空:通知主进程清空日志缓冲并广播,同时重设 key 让本行立即消失。
+              void api.clearLogs()
+              setClearedAt(Date.now())
+            }}
+          >
             {t('log.clear')}
           </button>
           <button

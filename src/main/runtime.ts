@@ -283,15 +283,18 @@ export function progressLine(label: string): (received: number, total: number | 
  * failure — the caller decides whether the expected output is present.
  */
 export async function extractZip(zipPath: string, destDir: string, label: string): Promise<boolean> {
-  const x = await runAsync('tar', ['-xf', zipPath, '-C', destDir], destDir, label, process.platform === 'win32', undefined, EXTRACT_TIMEOUT_MS)
+  // 必须用非 shell spawn(shell:true 会把参数拼成命令行交给 cmd.exe,含空格的路径
+  // 如 C:\Users\My Name\... 会被拆开导致「无法识别」)。spawn 直接传参数数组,空格安全。
+  const x = await runAsync('tar', ['-xf', zipPath, '-C', destDir], destDir, label, false, undefined, EXTRACT_TIMEOUT_MS)
   if (x.ok) return true
   taskLine(label, t('[runtime] tar 解压失败,改用 PowerShell Expand-Archive…', '[runtime] tar extraction failed, falling back to PowerShell Expand-Archive…'), 'stderr')
+  // PowerShell 的非 shell spawn:命令字符串里的单引号由 PowerShell 自身解析,路径含空格也正确。
   const ps = await runAsync(
     'powershell',
     ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath '${zipPath}' -DestinationPath '${destDir}'`],
     destDir,
     label,
-    true,
+    false,
     undefined,
     EXTRACT_TIMEOUT_MS
   )

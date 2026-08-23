@@ -51,6 +51,13 @@ function Shell(): JSX.Element {
   // restart, instance switch) never jumps — the user navigates there.
   const autoJumpDone = useRef(false)
 
+  // 托盘「设置」菜单项:打开窗口并导航到设置页。
+  useEffect(() => {
+    return api.onEvent((e) => {
+      if (e.type === 'launcher-page' && e.page === 'settings') setView('settings')
+    })
+  }, [])
+
   // Auto-switch: once DSH becomes ready, open the embedded view and tuck the
   // launcher into the sidebar rail. When DSH stops, return to the dashboard.
   useEffect(() => {

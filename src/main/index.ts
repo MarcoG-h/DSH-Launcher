@@ -1,9 +1,9 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, screen, shell } from 'electron'
 import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { bindWindow, broadcast } from './bus'
-import { getConfig } from './config'
+import { getConfig, setConfig } from './config'
 import * as dshStatus from './dsh-status'
 import { registerDshView } from './dshview'
 import { registerIpc } from './ipc'
@@ -31,9 +31,21 @@ function appIconPath(): string | undefined {
 }
 
 function createWindow(): BrowserWindow {
+  // 窗口大小/位置记忆:显示器数量与上次一致、且位置落在某个显示器工作区内时恢复,
+  // 否则用默认——防止显示器插拔/变动后窗口出现在屏幕外导致「打开失败」。
+  const displays = screen.getAllDisplays()
+  const wb = getConfig().windowBounds
+  let restore: { x: number; y: number; width: number; height: number } | undefined
+  if (wb && wb.displayCount === displays.length && wb.width > 0 && wb.height > 0) {
+    const r = { x: wb.x, y: wb.y, width: wb.width, height: wb.height }
+    const onScreen = displays.some((d) => {
+      const a = d.workArea
+      return r.x < a.x + a.width && r.x + r.width > a.x && r.y < a.y + a.height && r.y + r.height > a.y
+    })
+    if (onScreen) restore = r
+  }
   const win = new BrowserWindow({
-    width: 1180,
-    height: 760,
+    ...(restore ?? { width: 1180, height: 760 }),
     minWidth: 960,
     minHeight: 620,
     title: 'DSH Launcher',
@@ -56,6 +68,20 @@ function createWindow(): BrowserWindow {
       backgroundThrottling: false
     }
   })
+
+  // 停止调整 500ms 后保存窗口位置/大小(供下次启动恢复),同时记录显示器数量。
+  let saveTimer: NodeJS.Timeout | null = null
+  const saveBounds = (): void => {
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      const b = win.getBounds()
+      setConfig({
+        windowBounds: { x: b.x, y: b.y, width: b.width, height: b.height, displayCount: screen.getAllDisplays().length }
+      })
+    }, 500)
+  }
+  win.on('resize', saveBounds)
+  win.on('move', saveBounds)
 
   bindWindow(win)
   registerDshView(win)

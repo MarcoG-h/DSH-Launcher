@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { delimiter, dirname, join, resolve, sep } from 'node:path'
+import { basename, delimiter, dirname, join, resolve, sep } from 'node:path'
 import * as yaml from 'js-yaml'
 import { net } from 'electron'
 import { getConfig, setConfig } from './config'
@@ -11,7 +11,8 @@ import { bundledEnv, downloadFile, extractZip, progressLine, resolveBundledNode 
 import { runAsync, taskDone, taskLine, taskProgress } from './task'
 import { bundleTaskLabel, RECOMMENDED_BUNDLES } from '../shared/bundles'
 import { parseGitHubUrl } from '../shared/github'
-import type { CmdResult, InstalledPlugin, LocalPlugin, PluginCellStatus, PluginListResult, PluginMatrixColumn, PluginMatrixResult, PluginMeta } from '../shared/types'
+import { classifyPnpmFailure, pluginArgsFor } from './pnpm-compat'
+import type { BundlePlugin, CmdResult, InstalledPlugin, LocalPlugin, PluginCellStatus, PluginListResult, PluginMatrixColumn, PluginMatrixResult, PluginMeta, RecommendedBundle } from '../shared/types'
 
 function readJson(file: string): Record<string, unknown> | null {
   try {
@@ -175,21 +176,61 @@ function pnpmCmd(args: string[], cwd: string, label: string): Promise<CmdResult>
 
 function dshPluginCmd(home: string, profile: string, extra: string[]): { cmd: string; args: string[]; cwd: string; envPatch?: NodeJS.ProcessEnv } {
   const cfg = getConfig()
+  // pnpm 9 在 workspace 根目录 add/remove 需要 -w;仅当 profile 有 pnpm-workspace.yaml 时注入。
+  const fixed = pluginArgsFor(join(home, 'profiles', profile), extra)
   if (cfg.installMode === 'bundled') {
     // Run the bundled CLI; PATH is prefixed so its internal pnpm resolves to the portable copy.
     return {
       cmd: resolveBundledNode() ?? cfg.nodePath,
-      args: [...cfg.launchArgs, 'plugin', '--profile', profile, ...extra],
+      args: [...cfg.launchArgs, 'plugin', '--profile', profile, ...fixed],
       cwd: cfg.runtimeRoot,
       envPatch: { ...bundledEnv(), DSH_HOME: home }
     }
   }
   return {
     cmd: cfg.nodePath,
-    args: [...cfg.launchArgs, 'plugin', '--profile', profile, ...extra],
+    args: [...cfg.launchArgs, 'plugin', '--profile', profile, ...fixed],
     cwd: cfg.harnessRepo,
     envPatch: { DSH_HOME: home }
   }
+}
+
+/**
+ * 执行一次 dsh plugin 命令,带 pnpm 陷阱自动恢复(照抄 dsh-market 的 withHoistRecovery):
+ * - pnpm 大版本漂移(hoist-pattern-diff)→ 重建 install 后重试一次
+ * - release-age 锁 → 一次性 minimumReleaseAge=0 绕过重试
+ * - 瞬时网络失败 → 原样重试一次
+ * - fetch 超时 → 更长 fetchTimeout 重试一次
+ * 失败仍存活时,若识别出具体陷阱,把可操作提示附加到 error(替代原始报错墙)。
+ */
+async function runPluginCommand(home: string, profile: string, extra: string[], label: string): Promise<CmdResult> {
+  const runOnce = (args: string[]): Promise<CmdResult> => {
+    const { cmd, args: base, cwd, envPatch } = dshPluginCmd(home, profile, args)
+    return runAsync(cmd, base, cwd, label, process.platform === 'win32', envPatch)
+  }
+  const ok = (r: CmdResult): boolean => r.ok
+  let r = await runOnce(extra)
+  if (ok(r)) return r
+  const output = r.stderr ?? ''
+  const failure = classifyPnpmFailure(output)
+  if (failure?.code === 'hoist-pattern-diff') {
+    taskLine(label, t('[install] node_modules 由旧版 pnpm 创建,正在重建后重试…', '[install] node_modules was created by a different pnpm major; rebuilding and retrying…'), 'stderr')
+    await runOnce(['install', '--no-frozen-lockfile'])
+    r = await runOnce(extra)
+  } else if (failure?.code === 'release-age-violation' && (extra[0] === 'add' || extra[0] === 'remove')) {
+    taskLine(label, t('[install] pnpm 安全等待期拦截,正在放行重试…', '[install] pnpm fresh-release hold; bypassing and retrying…'), 'stderr')
+    r = await runOnce([extra[0], '--config.minimumReleaseAge=0', ...extra.slice(1)])
+  } else if (failure?.code === 'transient-network' && (extra[0] === 'add' || extra[0] === 'remove')) {
+    taskLine(label, t('[install] 拉取依赖时网络临时失败,自动重试一次…', '[install] transient network failure; retrying once…'), 'stderr')
+    r = await runOnce(extra)
+  } else if (failure?.code === 'fetch-timeout' && (extra[0] === 'add' || extra[0] === 'remove')) {
+    taskLine(label, t('[install] 下载超时,用更长的请求超时重试一次…', '[install] download timed out; retrying once with a longer fetch timeout…'), 'stderr')
+    r = await runOnce([extra[0], '--config.fetchTimeout=600000', ...extra.slice(1)])
+  }
+  if (!ok(r) && failure !== null) {
+    r = { ...r, error: failure.message }
+  }
+  return r
 }
 
 // --- reads ---
@@ -268,13 +309,33 @@ function scanLocal(): Array<Omit<LocalPlugin, 'status'>> {
   for (const entry of readdirSync(cfg.pluginDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
     if (entry.name === 'node_modules') continue // 运行时链接层(junction),不是插件仓库
+    if (entry.name.startsWith('.deleting-')) {
+      // 删除改名兜底遗留的残留:扫描时自动清理(未被占用的直接删),不显示成行。
+      const p = join(cfg.pluginDir, entry.name)
+      try {
+        rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 })
+      } catch {
+        // 长路径(旧版反复改名叠加)/Windows 句柄:改名成固定短名再删。
+        try {
+          const short = join(cfg.pluginDir, `.deleting-${process.pid}`)
+          if (p !== short) {
+            if (existsSync(short)) rmSync(short, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+            renameSync(p, short)
+          }
+          rmSync(short, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 })
+        } catch { /* 仍被占用,留待下次扫描清理 */ }
+      }
+      continue
+    }
     const entryPath = join(cfg.pluginDir, entry.name)
     if (looksLikeDshPlugin(entryPath).ok) {
       const pkg = readJson(join(entryPath, 'package.json')) ?? {}
       out.push(localEntry(pkg, entryPath))
       continue
     }
-    // Not a standalone plugin at the root — pick up any plugin subpackages.
+    // 仓库根不是独立插件:本地插件列表仍显示「这个仓库」一行(名称 = 目录名,
+    // 插件文件夹里有多少库就显示多少行),再列出可装的子包行。
+    out.push({ name: entry.name, version: '', description: '', path: entryPath, isBundle: false, platform: null })
     for (const sub of findPluginSubpackages(entryPath)) {
       const pkg = readJson(join(entryPath, sub.path, 'package.json')) ?? {}
       out.push(localEntry(pkg, join(entryPath, sub.path)))
@@ -285,8 +346,12 @@ function scanLocal(): Array<Omit<LocalPlugin, 'status'>> {
 
 export function listLocal(home: string, profile: string): LocalPlugin[] {
   const { installed } = listInstalled(home, profile)
-  const enabled = new Set(installed.filter((p) => p.enabled).map((p) => p.name))
-  return scanLocal().map((p) => ({ ...p, status: enabled.has(p.name) ? 'enabled' : 'not-installed' }))
+  const byName = new Map(installed.map((p) => [p.name, p]))
+  return scanLocal().map((p) => {
+    const ip = byName.get(p.name)
+    // 三态:本地库插件在某实例已安装但未启用 → 'installed';已启用 → 'enabled';未安装 → 'not-installed'。
+    return { ...p, status: ip ? (ip.enabled ? 'enabled' : 'installed') : 'not-installed' }
+  })
 }
 
 export function listPlugins(): PluginListResult {
@@ -339,7 +404,12 @@ export function listPluginMatrix(): PluginMatrixResult {
   for (const inst of shown) {
     const { installed } = listInstalled(instanceDshHome(inst), inst.profile)
     for (const p of installed) {
-      if (p.enabled) (cells[p.name] ??= {})[inst.id] = 'enabled'
+      if (p.enabled) {
+        (cells[p.name] ??= {})[inst.id] = 'enabled'
+      } else if (localNames.has(p.name)) {
+        // 本地库插件已安装到该实例但未启用 → 三态中间态「已安装未启用」。
+        (cells[p.name] ??= {})[inst.id] = 'installed'
+      }
       if (!p.enabled || p.localPath !== null || localNames.has(p.name) || seen.has(p.name)) continue
       seen.add(p.name)
       directRows.push({
@@ -486,8 +556,7 @@ export async function install(home: string, profile: string, spec: string, name?
   // 否则 node-llama-cpp 等原生依赖的跨平台二进制会让整个 profile 的安装失败。
   ensureProfilePnpmSettings(home, profile)
   const before = depNames(home, profile)
-  const { cmd, args, cwd, envPatch } = dshPluginCmd(home, profile, ['add', target, ...(flags ?? [])])
-  let r = await runAsync(cmd, args, cwd, `install:${target}`, process.platform === 'win32', envPatch)
+  let r = await runPluginCommand(home, profile, ['add', target, ...(flags ?? [])], `install:${target}`)
   if (!r.ok) {
     // pnpm 10 blocks git-hosted packages that run build scripts unless they're
     // in the profile's allowBuilds whitelist. Self-heal: whitelist the package
@@ -495,7 +564,7 @@ export async function install(home: string, profile: string, spec: string, name?
     const blocked = parseAllowBuildsKey(r.stderr)
     if (blocked && allowBuildsWhitelist(home, profile, blocked)) {
       taskLine(`install:${target}`, t(`检测到 pnpm allowBuilds 白名单缺失,已加入 ${blocked} 并重试…`, `Detected missing allowBuilds whitelist entry; added ${blocked} and retrying…`), 'stderr')
-      r = await runAsync(cmd, args, cwd, `install:${target}`, process.platform === 'win32', envPatch)
+      r = await runPluginCommand(home, profile, ['add', target, ...(flags ?? [])], `install:${target}`)
     }
   }
   if (r.ok) {
@@ -510,14 +579,27 @@ export async function install(home: string, profile: string, spec: string, name?
 }
 
 export async function remove(home: string, profile: string, name: string): Promise<CmdResult> {
-  const { cmd, args, cwd, envPatch } = dshPluginCmd(home, profile, ['remove', name])
-  return runAsync(cmd, args, cwd, `remove:${name}`, process.platform === 'win32', envPatch)
+  return runPluginCommand(home, profile, ['remove', name], `remove:${name}`)
 }
 
 /** Uninstall a plugin from a profile: drop it from bundles first, then the dependency. */
 export async function disable(home: string, profile: string, name: string): Promise<CmdResult> {
+  // 停用 = 只移除挂载(本地源码 / 直装包仍在),不卸载依赖——卸载慢、易卡,
+  // 且本地持有插件源码就在本地,重新启用直接 setEnabled(true) 即可,无需重装。
+  setEnabled(home, profile, name, false)
+  return { ok: true, code: 0 }
+}
+
+/** 从某个实例卸载依赖(「已安装未启用」的卸载):移除挂载并删除该实例的依赖。 */
+export async function uninstall(home: string, profile: string, name: string): Promise<CmdResult> {
   setEnabled(home, profile, name, false)
   return remove(home, profile, name)
+}
+
+/** 启用一个已安装但未启用的插件(不重新安装):按 bundle/insert 通道加回挂载。 */
+export async function enable(home: string, profile: string, name: string): Promise<CmdResult> {
+  setEnabled(home, profile, name, true)
+  return { ok: true, code: 0 }
 }
 
 /**
@@ -545,7 +627,7 @@ export async function update(home: string, profile: string, name: string): Promi
       if (!git.ok) {
         taskLine(label, git.error, 'stderr')
       } else {
-        const pull = await runAsync(git.exe, ['-C', localPath, 'pull', '--ff-only'], process.cwd(), label, process.platform === 'win32', gitEnvFor(git.exe), GIT_TIMEOUT_MS)
+        const pull = await runAsync(git.exe, ['-C', localPath, 'pull', '--ff-only'], process.cwd(), label, false, gitEnvFor(git.exe), GIT_TIMEOUT_MS)
         if (!pull.ok) taskLine(label, t('[update] 拉取失败，继续重装现有代码。', '[update] Pull failed; reinstalling existing code.'), 'stderr')
       }
     }
@@ -689,15 +771,24 @@ function removeDirForce(dir: string): void {
   } catch {
     // EPERM/EBUSY——目录可能被运行中的实例占用,走改名兜底。
   }
-  const trash = `${dir}.deleting-${process.pid}-${Date.now()}`
+  // 统一改名名(固定,不带时间戳):避免反复改名时 `.deleting-` 后缀叠加累积成
+  // `.deleting-….deleting-….deleting-…` 一串(用户实际遇到过的残留)。
+  const base = basename(dir)
+  const trash = base.startsWith('.deleting-')
+    ? join(dirname(dir), `.deleting-${process.pid}`)
+    : `${dir}.deleting-${process.pid}`
   try {
     renameSync(dir, trash)
-    rmSync(trash, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    rmSync(trash, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
   } catch {
-    throw new Error(t(
-      `目录被占用,无法删除 ${dir}。若插件正被运行中的实例加载,请先停止该实例再移除。`,
-      `Directory is locked and could not be removed: ${dir}. If the plugin is loaded by a running instance, stop it first.`
-    ))
+    // 改名成功 = 原路径已从本地库消失,视为移除成功;清残余失败不阻塞,交给
+    // cleanupDeletingResidue 下次清理。只有「改名本身失败」(目录仍被打开)才是真占用。
+    if (existsSync(dir)) {
+      throw new Error(t(
+        `目录被占用,无法删除 ${dir}。若插件正被运行中的实例加载,请先停止该实例再移除。`,
+        `Directory is locked and could not be removed: ${dir}. If the plugin is loaded by a running instance, stop it first.`
+      ))
+    }
   }
 }
 
@@ -707,9 +798,56 @@ function removeDirForce(dir: string): void {
  * then delete its source from pluginDir. Returns the affected instance ids so
  * the caller can restart the running ones.
  */
+/**
+ * 清理命令行中涉及 `dir` 的残留 node/dsh/electron 进程。实例已停止但可能残留孤儿
+ * 子进程(如 dsh 派生的插件进程)仍持有本地库文件句柄,导致删除 EPERM。幂等:只杀
+ * 匹配进程,其余不动。仅 Windows。
+ */
+function killResidualProcesses(dir: string): Promise<void> {
+  if (process.platform !== 'win32') return Promise.resolve()
+  return new Promise((resolve) => {
+    const ps = spawn(
+      'powershell',
+      ['-NoProfile', '-NonInteractive', '-Command',
+        `Get-CimInstance Win32_Process | Where-Object { ($_.Name -match 'node|dsh|electron') -and ($_.CommandLine -like '*${dir}*') } | ForEach-Object { taskkill /F /T /PID $($_.ProcessId) }`],
+      { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] },
+    )
+    ps.on('close', () => resolve())
+    ps.on('error', () => resolve())
+  })
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms))
+}
+
+/** 清理本地库下删除改名兜底遗留的 `.deleting-*` 残留(未被占用的直接删,防累积)。 */
+function cleanupDeletingResidue(): void {
+  const pluginDir = getConfig().pluginDir
+  if (!pluginDir || !existsSync(pluginDir)) return
+  for (const entry of readdirSync(pluginDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith('.deleting-')) continue
+    try {
+      rmSync(join(pluginDir, entry.name), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+    } catch {
+      /* 仍被占用,留待下次清理 */
+    }
+  }
+}
+
 export async function removeFromLibrary(name: string): Promise<CmdResult> {
   const cfg = getConfig()
+  // 先清理历史上删除改名兜底遗留的 `.deleting-*` 残留(未被占用的直接删)。
+  cleanupDeletingResidue()
   const entry = scanLocal().find((p) => p.name === name)
+  // 完整性检定(仅在删除时触发):
+  // - entry 存在(scanLocal 认得它)= 完整插件 → 正常删除。
+  // - 目录仍在但 scanLocal 不认(部分移除/损坏,如 package.json 已丢)= 视为
+  //   残余,自动清掉,避免它一直显示在本地库或占用名字。
+  // - 目录已整体消失(此前已移除)= 按移除成功处理,不再报「找不到」。
+  const dir = entry?.path ?? join(cfg.pluginDir, name)
+  const dirExists = existsSync(dir)
+
   const affected: string[] = []
   for (const inst of cfg.instances) {
     const home = instanceDshHome(inst)
@@ -719,14 +857,19 @@ export async function removeFromLibrary(name: string): Promise<CmdResult> {
     const r = await remove(home, inst.profile, name)
     if (r.ok) affected.push(inst.id)
   }
-  if (entry) {
+
+  if (dirExists) {
+    // 实例已停,但仍可能有残留进程(孤儿 dsh/node 子进程)占用本地库文件导致删除
+    // 失败——先清掉命令行涉及该目录的残留进程,稍等句柄释放再删。
+    await killResidualProcesses(dir)
+    await delay(400)
     try {
-      removeDirForce(entry.path)
+      removeDirForce(dir)
     } catch (e) {
       return { ok: false, code: 1, error: e instanceof Error ? e.message : String(e), affected }
     }
   }
-  // 插件已从本地库移除,连同它的显示名/备注一并清掉,
+  // 插件已从本地库移除(或本就已移除),连同它的显示名/备注一并清掉,
   // 避免「插件删了、名字还留在上面」的残留(此前推荐整合包功能遗留过这个问题)。
   if (cfg.pluginMeta?.[name]) setPluginMeta(name, { displayName: '', remark: '' })
   return { ok: true, code: 0, affected }
@@ -736,8 +879,14 @@ export async function removeFromLibrary(name: string): Promise<CmdResult> {
 export async function removeFromLibraryMany(names: string[]): Promise<CmdResult> {
   const affected: string[] = []
   const warnings: string[] = []
+  const label = 'remove-many'
+  const total = Math.max(names.length, 1)
+  taskProgress(label, 0, t('开始删除…', 'Starting removal…'))
+  let done = 0
   for (const name of names) {
     try {
+      done += 1
+      taskProgress(label, done / total, t(`正在删除 ${name} (${done}/${total})…`, `Removing ${name} (${done}/${total})…`))
       const r = await removeFromLibrary(name)
       for (const id of r.affected ?? []) if (!affected.includes(id)) affected.push(id)
       if (!r.ok) warnings.push(t(`「${name}」移除失败: ${r.error ?? ''}`, `"${name}" removal failed: ${r.error ?? ''}`))
@@ -745,6 +894,7 @@ export async function removeFromLibraryMany(names: string[]): Promise<CmdResult>
       warnings.push(t(`「${name}」移除出错: ${String(e)}`, `"${name}" removal error: ${String(e)}`))
     }
   }
+  taskDone(label, 0)
   return { ok: true, code: 0, affected, warnings: warnings.length ? warnings : undefined }
 }
 
@@ -823,18 +973,103 @@ export async function ensureRuntimeLinks(home: string, profile: string): Promise
   }
 }
 
+/** 整合包清单校验(对齐 dsh-plugin-pack schema 的基本约束)。返回问题列表(空 = 合法)。 */
+function validateBundle(bundle: RecommendedBundle): string[] {
+  const errors: string[] = []
+  const ids = new Set<string>()
+  for (const p of bundle.community) {
+    const id = p.id ?? p.name
+    if (!id) { errors.push(t('整合包内有插件缺少 id/name', 'A bundle plugin is missing id/name')); continue }
+    if (ids.has(id)) errors.push(t(`插件 id 重复: ${id}`, `Duplicate plugin id: ${id}`))
+    ids.add(id)
+    if (p.kind !== undefined && p.kind !== 'plugin' && p.kind !== 'extension') {
+      errors.push(t(`插件 ${id} 的 kind 非法: ${p.kind}`, `Invalid kind for plugin ${id}: ${p.kind}`))
+    }
+    if (!p.spec && !p.name) errors.push(t(`插件 ${id} 缺少 spec`, `Plugin ${id} is missing spec`))
+    for (const r of p.requires ?? []) {
+      if (r !== id && !bundle.community.some((o) => (o.id ?? o.name) === r)) {
+        errors.push(t(`插件 ${id} requires 的宿主不在本整合包: ${r}`, `Plugin ${id} requires a host not in this pack: ${r}`))
+      }
+    }
+  }
+  return errors
+}
+
+/** 在线整合包市场索引(dsh-plugin-pack 规范的市场收录文件)。 */
+const MARKET_INDEX_URL = 'https://raw.githubusercontent.com/baihejiangnan/dsh-plugin-pack/main/market/index.json'
+/** 拉取结果缓存,避免每次安装都请求网络。 */
+let remoteBundlesCache: RecommendedBundle[] | null = null
+/** 是否成功连上在线整合包库(UI 据此显示「已连接 Pack 整合包库」)。 */
+let packConnected = false
+
+/** 把 raw.githubusercontent 地址转为 jsdelivr CDN(国内可访问;raw 常被墙)。 */
+function toCdn(url: string): string {
+  const m = /raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)/.exec(url)
+  if (!m) return url
+  return `https://cdn.jsdelivr.net/gh/${m[1]}/${m[2]}@${m[3]}/${m[4]}`
+}
+
+/**
+ * 拉取在线整合包清单(全部整合包由 dsh-plugin-pack 市场提供):market/index.json 列出
+ * 各 pack,逐个拉取其 dsh-plugin-pack.json 并转换为 RecommendedBundle。网络失败回退内置。
+ * 返回 bundles(远程在前 + 内置兜底)与 connected(是否成功连上在线库)。
+ */
+export async function fetchRemoteBundles(): Promise<{ bundles: RecommendedBundle[]; connected: boolean }> {
+  if (remoteBundlesCache !== null) {
+    return { bundles: packConnected ? remoteBundlesCache : RECOMMENDED_BUNDLES, connected: packConnected }
+  }
+  remoteBundlesCache = []
+  packConnected = false
+  try {
+    const indexRes = await fetch(toCdn(MARKET_INDEX_URL), { signal: AbortSignal.timeout(8000) })
+    if (!indexRes.ok) throw new Error(`index HTTP ${indexRes.status}`)
+    const index = (await indexRes.json()) as { packs?: { id?: string; name?: string; description?: string; sourceUrl?: string; profile?: string }[] }
+    for (const pack of index.packs ?? []) {
+      if (!pack.sourceUrl) continue
+      const res = await fetch(toCdn(pack.sourceUrl), { signal: AbortSignal.timeout(8000) })
+      if (!res.ok) continue
+      const m = (await res.json()) as {
+        schemaVersion?: number; id?: string; name?: string; version?: string; description?: string; license?: string
+        plugins?: Array<{ id?: string; name?: string; kind?: 'plugin' | 'extension'; requires?: string[]; spec?: string; repository?: string; description?: string }>
+      }
+      const community = (m.plugins ?? []).map((pl) => ({
+        id: pl.id, name: pl.name, kind: pl.kind, requires: pl.requires,
+        spec: pl.spec, repository: pl.repository, description: pl.description
+      }))
+      if (community.length === 0) continue
+      remoteBundlesCache.push({
+        schemaVersion: m.schemaVersion ?? 1,
+        id: m.id ?? pack.id ?? '',
+        name: m.name ?? pack.name ?? '',
+        version: m.version,
+        description: m.description ?? pack.description ?? '',
+        license: m.license,
+        community
+      })
+      packConnected = true
+    }
+  } catch {
+    remoteBundlesCache = [] // 网络失败 → 只用内置
+  }
+  // 连接成功:整合包完全由在线库提供(不含内置);离线/失败:回退内置。
+  return { bundles: packConnected ? remoteBundlesCache : RECOMMENDED_BUNDLES, connected: packConnected }
+}
+
 export async function installBundle(
   bundleId: string,
   options?: { retrySpecs?: string[]; homeMode?: 'shared' | 'isolated'; home?: string },
 ): Promise<CmdResult> {
-  const bundle = RECOMMENDED_BUNDLES.find((b) => b.id === bundleId)
+  const bundles = (await fetchRemoteBundles()).bundles
+  const bundle = bundles.find((b) => b.id === bundleId)
   if (!bundle) return { ok: false, code: null, error: t('未找到整合包。', 'Bundle not found.') }
   const warnings: string[] = []
   const failedSpecs: string[] = []
+  // 清单校验(阶段 4):不合法的问题作为警告列出,不阻断安装(宽松)。
+  warnings.push(...validateBundle(bundle))
   const retrySpecs = options?.retrySpecs
   // 重试模式(传入了上次失败的 spec 清单):跳过建实例与 profile 修复,只对清单里的插件重新直装。
   const retry = Array.isArray(retrySpecs) && retrySpecs.length > 0
-  const community: Array<{ name?: string; spec?: string; flags?: string[] }> = retry
+  const community: BundlePlugin[] = retry
     ? (retrySpecs as string[]).map((spec) => ({ name: spec, spec }))
     : bundle.community
 
@@ -885,8 +1120,14 @@ export async function installBundle(
     }
 
     // 2) 插件:逐个 `dsh plugin add <spec>` 直装最新版。
+    // requires 依赖顺序(阶段 3):先装 plugin 宿主,再装 extension 扩展。
+    const ordered = [...community].sort((a, b) => {
+      const ae = (a.kind === 'extension' ? 1 : 0)
+      const be = (b.kind === 'extension' ? 1 : 0)
+      return ae - be
+    })
     let n = 0
-    for (const p of community) {
+    for (const p of ordered) {
       const spec = p.spec || p.name
       if (!spec) continue
       n += 1
@@ -1147,8 +1388,9 @@ async function hasAnyPackageJson(gh: { owner: string; repo: string }): Promise<b
  * files that declare a `dsh` config — the same shape `looksLikeDshPlugin`
  * checks. Skips `node_modules` / `.git`.
  */
-function findPluginSubpackages(target: string): Array<{ path: string; name: string }> {
+function findPluginSubpackages(target: string, depth = 0): Array<{ path: string; name: string }> {
   const out: Array<{ path: string; name: string }> = []
+  if (depth > 5) return out
   let entries: string[]
   try {
     entries = readdirSync(target, { withFileTypes: true })
@@ -1158,10 +1400,15 @@ function findPluginSubpackages(target: string): Array<{ path: string; name: stri
     return out
   }
   for (const name of entries) {
-    const pkg = readJson(join(target, name, 'package.json'))
-    const dsh = pkg?.dsh
-    if (pkg && typeof pkg.name === 'string') {
-      if (dsh && typeof dsh === 'object') out.push({ path: name, name: pkg.name })
+    const dir = join(target, name)
+    const pkg = readJson(join(dir, 'package.json'))
+    if (pkg && typeof pkg.name === 'string' && pkg.dsh && typeof pkg.dsh === 'object') {
+      out.push({ path: name, name: pkg.name })
+    } else {
+      // 递归更深层(packages/xxx 等多层 monorepo),最多 5 层,路径用 / 连接。
+      for (const sub of findPluginSubpackages(dir, depth + 1)) {
+        out.push({ path: `${name}/${sub.path}`, name: sub.name })
+      }
     }
   }
   return out
@@ -1188,13 +1435,13 @@ export async function downloadHarness(): Promise<CmdResult> {
   if (isIncompleteGitDir(target)) rmSync(target, { recursive: true, force: true })
   const isGit = existsSync(join(target, '.git'))
   if (isGit) {
-    const pull = await runAsync(git.exe, ['-C', target, 'pull', '--ff-only'], process.cwd(), label, process.platform === 'win32', gitEnv, GIT_TIMEOUT_MS)
+    const pull = await runAsync(git.exe, ['-C', target, 'pull', '--ff-only'], process.cwd(), label, false, gitEnv, GIT_TIMEOUT_MS)
     if (!pull.ok) taskLine(label, t('[download] 拉取未完成(可能有本地改动),继续使用现有代码。', '[download] Pull incomplete (possible local changes); using existing code.'), 'stderr')
   } else if (existsSync(target) && readdirSync(target).length > 0) {
     taskLine(label, t('[download] 目标目录非空且非 git 仓库,跳过克隆,仅安装依赖。', '[download] Target dir is non-empty and not a git repo; skipping clone, installing deps only.'), 'stderr')
     taskDone(label, 0)
   } else {
-    const clone = await runAsync(git.exe, cloneArgs(authedCloneUrl(url, cfg.githubToken), target), process.cwd(), label, process.platform === 'win32', gitEnv, GIT_TIMEOUT_MS, cfg.githubToken)
+    const clone = await runAsync(git.exe, cloneArgs(authedCloneUrl(url, cfg.githubToken), target), process.cwd(), label, false, gitEnv, GIT_TIMEOUT_MS, cfg.githubToken)
     if (!clone.ok) {
       // Wipe the partial clone (may only contain `.git`) so a retry starts fresh.
       rmSync(target, { recursive: true, force: true })
@@ -1269,10 +1516,10 @@ export async function downloadPlugin(url: string, subdir?: string, _profile?: st
 
   if (isIncompleteGitDir(target)) rmSync(target, { recursive: true, force: true })
   if (existsSync(join(target, '.git'))) {
-    const pull = await runAsync(git.exe, ['-C', target, 'pull', '--ff-only'], process.cwd(), label, process.platform === 'win32', gitEnv, GIT_TIMEOUT_MS)
+    const pull = await runAsync(git.exe, ['-C', target, 'pull', '--ff-only'], process.cwd(), label, false, gitEnv, GIT_TIMEOUT_MS)
     if (!pull.ok) taskLine(label, t('[download] 拉取未完成,使用现有代码。', '[download] Pull incomplete; using existing code.'), 'stderr')
   } else {
-    const clone = await runAsync(git.exe, cloneArgs(authedCloneUrl(gh.cloneUrl, cfg.githubToken), target, gh.ref), process.cwd(), label, process.platform === 'win32', gitEnv, GIT_TIMEOUT_MS, cfg.githubToken)
+    const clone = await runAsync(git.exe, cloneArgs(authedCloneUrl(gh.cloneUrl, cfg.githubToken), target, gh.ref), process.cwd(), label, false, gitEnv, GIT_TIMEOUT_MS, cfg.githubToken)
     if (!clone.ok) {
       // Wipe the partial clone (may only contain `.git`) so a retry starts fresh.
       rmSync(target, { recursive: true, force: true })
@@ -1281,46 +1528,9 @@ export async function downloadPlugin(url: string, subdir?: string, _profile?: st
     }
   }
 
-  // Resolve the installable package directory inside the clone: an explicit
-  // subdir wins, then the repo root, then the single subpackage, then ask.
-  const rootCheck = looksLikeDshPlugin(target)
-  const subpkgs = findPluginSubpackages(target)
-
-  let pkgDir: string
-  if (subdir) {
-    // Explicit choice from the UI chooser — validate, guarding path traversal.
-    const resolved = resolve(target, subdir)
-    if (resolved !== target && !resolved.startsWith(target + sep)) {
-      taskDone(label, 1)
-      return { ok: false, code: null, error: t('无效的子包路径。', 'Invalid subpackage path.') }
-    }
-    const subCheck = looksLikeDshPlugin(resolved)
-    if (!subCheck.ok) {
-      taskDone(label, 1)
-      return { ok: false, code: null, error: subCheck.reason }
-    }
-    pkgDir = resolved
-  } else if (rootCheck.ok) {
-    pkgDir = target
-  } else if (subpkgs.length === 1) {
-    pkgDir = join(target, subpkgs[0].path)
-    taskLine(label, t(`[download] 检测到插件子包 <${subpkgs[0].name}>(${subpkgs[0].path}),将随仓库一并下载到本地库。`, `[download] Found plugin subpackage <${subpkgs[0].name}> (${subpkgs[0].path}); downloading with the repo into the local library.`))
-  } else if (subpkgs.length > 1) {
-    taskLine(label, t(`[download] 该仓库包含 ${subpkgs.length} 个插件子包,请选择要下载的。`, `[download] This repo ships ${subpkgs.length} plugin subpackages — pick one to download.`), 'stderr')
-    taskDone(label, 1)
-    return {
-      ok: false,
-      code: null,
-      error: t('该仓库包含多个插件包,请选择要下载的。', 'This repo contains several plugin packages — pick one to download.'),
-      packages: subpkgs
-    }
-  } else {
-    taskLine(label, t(`[download] 已下载到 ${target},但它不是可下载的 dsh 插件。`, `[download] Downloaded to ${target}, but it is not a downloadable dsh plugin.`), 'stderr')
-    taskDone(label, 1)
-    return { ok: false, code: null, error: t('该仓库没有任何可下载的 dsh 插件包。', 'This repo has no downloadable dsh plugin package.') }
-  }
-
-  taskLine(label, t(`[download] 已下载到本地库: ${pkgDir} — 可在「插件」页启用。`, `[download] Downloaded to the local library: ${pkgDir} — enable it from the Plugins page.`))
+  // 下载 = 克隆整个仓库到本地库。插件定位/选择交由「插件」页(矩阵,scanLocal 会
+  // 列出仓库根与所有子包),这里不做单个包判定——克隆成功即下载成功。
+  taskLine(label, t(`[download] 已下载到本地库: ${target} — 可在「插件」页启用。`, `[download] Downloaded to the local library: ${target} — enable it from the Plugins page.`))
   taskDone(label, 0)
   return { ok: true, code: 0 }
 }

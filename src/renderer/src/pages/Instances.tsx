@@ -60,9 +60,14 @@ function QaModal({ title, qa, onClose }: { title: string; qa: QaItem[]; onClose:
             <div className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
               Q{i + 1}. {item.q}
             </div>
-            <p className="select-text text-[12.5px] leading-relaxed" style={{ color: 'var(--muted)' }}>
-              {item.a}
-            </p>
+            <p
+              className="select-text text-[12.5px] leading-relaxed"
+              style={{ color: 'var(--muted)' }}
+              // 支持 [text](url) markdown 链接(主窗口 setWindowOpenHandler 会 openExternal)。
+              dangerouslySetInnerHTML={{
+                __html: item.a.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer" style="color:var(--accent);text-decoration:underline">$1</a>')
+              }}
+            />
           </div>
         ))}
       </div>
@@ -96,7 +101,8 @@ function EditInstanceModal({ inst, onClose }: { inst: DshInstance; onClose: () =
   const [pluginBusy, setPluginBusy] = useState<string | null>(null)
   const st = states[inst.id]?.status ?? 'stopped'
   const isActive = inst.id === activeInstanceId
-  const canStop = st !== 'stopped' && st !== 'error'
+  // error 也允许停止:异常报错但实例可能仍在运行,需要能点「停止」清理残留。
+  const canStop = st !== 'stopped'
 
   const set = <K extends keyof InstanceForm>(k: K, v: InstanceForm[K]): void => {
     setForm((f) => ({ ...f, [k]: v }))
@@ -130,9 +136,11 @@ function EditInstanceModal({ inst, onClose }: { inst: DshInstance; onClose: () =
   }
 
   const remove = async (): Promise<void> => {
-    // 删除只移除配置条目,磁盘上的数据目录 / profile / 会话全部保留(2026-08-19 决策,
-    // 防止任何误删风险);如确定不要垃圾,可自行手动清理对应目录。
     if (!window.confirm(t('settings.confirmRemoveInstance', { name: inst.name }))) return
+    // 独立 home 实例:会删除整个 DSH_HOME(会话/插件/凭据),二次确认,防止误删。
+    if (inst.dshHome) {
+      if (!window.confirm(t('settings.confirmRemoveIsolated', { name: inst.name, home: inst.dshHome }))) return
+    }
     setBusy('remove')
     try {
       await api.removeInstance(inst.id)
@@ -819,6 +827,12 @@ export function Instances(): JSX.Element {
   const [editing, setEditing] = useState<DshInstance | null>(null)
   const [creating, setCreating] = useState(false)
   const [bundleBusy, setBundleBusy] = useState<string | null>(null)
+  // 整合包清单:全部由在线库提供(拉取失败回退内置)。
+  const [remoteBundles, setRemoteBundles] = useState<RecommendedBundle[] | null>(null)
+  const [packConnected, setPackConnected] = useState(false)
+  useEffect(() => {
+    void api.bundles().then((r) => { setRemoteBundles(r.bundles); setPackConnected(r.connected) }).catch(() => { /* 网络失败 → 用内置整合包 */ })
+  }, [])
   const [bundleError, setBundleError] = useState<string | null>(null)
   const [bundleNote, setBundleNote] = useState<string[] | null>(null)
   // 失败插件的 spec 清单(带归属整合包):驱动「一键重试」按钮。
@@ -928,7 +942,7 @@ export function Instances(): JSX.Element {
           </button>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {RECOMMENDED_BUNDLES.map((bundle) => {
+          {(remoteBundles ?? RECOMMENDED_BUNDLES).map((bundle) => {
             // 下载中判定:installBundle 进行中(bundleBusy)且该包有进度任务;
             // 点击卡片回到进度弹窗而不是重复下载,百分比从总进度任务实时取。
             const task = tasks[bundleTaskLabel(bundle)]
@@ -997,6 +1011,11 @@ export function Instances(): JSX.Element {
             )
           })}
         </div>
+        {packConnected && (
+          <div className="flex justify-end pt-1.5">
+            <span className="text-[11px]" style={{ color: 'var(--ok)' }}>{t('instances.packConnected')}</span>
+          </div>
+        )}
         {bundleError && (
           <div className="mt-2 flex items-start justify-between gap-2 text-[12px]" style={{ color: 'var(--err)' }}>
             <p className="select-text break-all">{bundleError}</p>
@@ -1082,7 +1101,8 @@ export function Instances(): JSX.Element {
             { q: t('instances.qaBundle.3.q'), a: t('instances.qaBundle.3.a') },
             { q: t('instances.qaBundle.4.q'), a: t('instances.qaBundle.4.a') },
             { q: t('instances.qaBundle.5.q'), a: t('instances.qaBundle.5.a') },
-            { q: t('instances.qaBundle.6.q'), a: t('instances.qaBundle.6.a') }
+            { q: t('instances.qaBundle.6.q'), a: t('instances.qaBundle.6.a') },
+            { q: t('instances.qaBundle.7.q'), a: t('instances.qaBundle.7.a') }
           ]}
         />
       )}

@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { createConnection } from 'node:net'
+import { watchPort } from './browser-guard'
 import { getConfig } from './config'
 import { getInstance, getInstances, ensureWorkspace, instanceDshHome, stripBomIfPresent, ensureProfile } from './instances'
 import { t } from './i18n'
@@ -117,6 +118,15 @@ export function getAllLogs(): Record<string, LogLine[]> {
   const out: Record<string, LogLine[]> = {}
   for (const inst of getInstances()) out[inst.id] = getLog(inst.id)
   return out
+}
+
+/** 清空所有实例的日志缓冲,并广播让 UI 清空显示。 */
+export function clearAllLogs(): void {
+  for (const inst of getInstances()) {
+    const rt = runtimes.get(inst.id)
+    if (rt) rt.log = []
+  }
+  broadcast({ type: 'logs-cleared' })
 }
 
 function patch(rt: Runtime, p: Partial<HarnessState>): void {
@@ -444,6 +454,8 @@ function startPortProbe(rt: Runtime): void {
         pushLine(rt, 'stdout', t(`[launcher] ✔ 就绪 — Web UI: http://127.0.0.1:${rt.effectivePort}`, `[launcher] ✔ Ready — Web UI: http://127.0.0.1:${rt.effectivePort}`))
         // A manual restart has applied any pending plugin changes — clear the flag.
         patch(rt, { status: 'running', ready: true, port: rt.effectivePort, pendingRestart: false, lastError: null })
+        // 就绪后短时高频检测浏览器是否自动弹出了该地址(--no-open 的兜底),窗口 30s 后停止。
+        watchPort(rt.effectivePort)
         stopPortProbe(rt)
         clearStartTimer(rt)
       }
@@ -655,9 +667,22 @@ function stopRuntime(rt: Runtime): Promise<void> {
         }
         return
       }
-      rt.stoppedAt = Date.now()
-      patch(rt, { status: 'stopped', pid: null, ready: false })
-      resolve()
+      // 额外检测:异常报错(status=error/stopped)但 dsh 进程/端口仍残留时,强制清理
+      // 占用的 dsh 进程,确保「关闭」真的关掉了,而不是只把状态置为 stopped。
+      const cleanup = async (): Promise<void> => {
+        if (rt.effectivePort > 0) {
+          const pid = await findListeningPid(rt.effectivePort)
+          if (pid && (await isLeftoverDsh(pid))) {
+            pushLine(rt, 'stderr', t(`[launcher] 检测到残留 dsh 进程 (pid=${pid}),强制清理…`, `[launcher] Found a leftover dsh process (pid=${pid}); force-cleaning…`))
+            await killPid(pid)
+            await delay(400)
+          }
+        }
+        rt.stoppedAt = Date.now()
+        patch(rt, { status: 'stopped', pid: null, ready: false })
+        resolve()
+      }
+      void cleanup()
       return
     }
     if (rt.stopping) {

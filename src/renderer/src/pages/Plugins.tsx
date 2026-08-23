@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { api, type PluginListResult, type PluginMatrixResult, type PluginMatrixRow, type PluginMeta } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
@@ -21,7 +21,7 @@ export function Plugins(): JSX.Element {
   const [matrix, setMatrix] = useState<PluginMatrixResult | null>(null)
   const [list, setList] = useState<PluginListResult | null>(null)
   const [spec, setSpec] = useState('')
-  const [busy, setBusy] = useState<string | null>(null)
+  const [busy, setBusy] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [tab, setTab] = useState<'local' | 'market'>('market')
   const [menu, setMenu] = useState<CellMenu | null>(null)
@@ -60,7 +60,8 @@ export function Plugins(): JSX.Element {
   }, [loadMatrix, loadList])
 
   const run = async (label: string, fn: () => Promise<unknown>): Promise<void> => {
-    setBusy(label)
+    // 支持并行:多个安装/操作可同时进行,busy 是「进行中任务」的集合,而非互斥锁。
+    setBusy((prev) => new Set(prev).add(label))
     setError(null)
     try {
       await fn()
@@ -69,7 +70,11 @@ export function Plugins(): JSX.Element {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setBusy(null)
+      setBusy((prev) => {
+        const next = new Set(prev)
+        next.delete(label)
+        return next
+      })
     }
   }
 
@@ -100,8 +105,8 @@ export function Plugins(): JSX.Element {
   const doRemoveMany = async (): Promise<void> => {
     const names = [...selected]
     if (!names.length) return
-    if (!window.confirm(t('plugins.removeManyConfirm', { count: names.length }))) return
-    setBusy('remove-many')
+    if (!await api.confirm(t('plugins.removeManyConfirm', { count: names.length }))) return
+    setBusy(new Set(['remove-many']))
     setError(null)
     try {
       const r = await api.removeFromLibraryMany(names)
@@ -112,7 +117,7 @@ export function Plugins(): JSX.Element {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setBusy(null)
+      setBusy(new Set())
     }
   }
 
@@ -126,9 +131,13 @@ export function Plugins(): JSX.Element {
     [tasks]
   )
 
+  const removeManyTask = tasks['remove-many']
   const rows = matrix?.rows ?? []
   const columns = matrix?.columns ?? []
   const cells = matrix?.cells ?? {}
+  // 分组:本地持有的插件(DSH-Plugin 有源码)vs 直装插件(dsh plugin add 装的,可折叠)。
+  const localOwnedRows = rows.filter((r) => r.path !== '')
+  const directOnlyRows = rows.filter((r) => r.path === '')
   const installed = list?.installed ?? []
   const local = list?.local ?? []
   // 可批量删除的行 = 本地库插件;直装行(path 为空)不在本地库,批量删除会变成「全实例卸载」,不勾选。
@@ -190,7 +199,8 @@ export function Plugins(): JSX.Element {
           local={local}
           // 矩阵里任意实例已启用的插件(dsh plugin add 直装可能在非活动实例),市场 tab 也应标为已下载。
           extraInstalledNames={Object.keys(cells)}
-          onRefresh={() => void loadList()}
+          // 下载/更新后同时刷新列表与矩阵,否则新下载的插件不会出现在本地库(矩阵)。
+          onRefresh={() => { void loadList(); void loadMatrix() }}
         />
       ) : (
         <>
@@ -209,7 +219,7 @@ export function Plugins(): JSX.Element {
                   if (e.key === 'Enter') doInstall()
                 }}
               />
-              <button className="btn btn-primary shrink-0" disabled={!spec.trim() || busy !== null} onClick={doInstall}>
+              <button className="btn btn-primary shrink-0" disabled={!spec.trim() || busy.size > 0} onClick={doInstall}>
                 {gh ? <DownloadIcon /> : <PlayIcon />} {gh ? t('plugins.downloadInstall') : t('plugins.install')}
               </button>
             </div>
@@ -249,7 +259,7 @@ export function Plugins(): JSX.Element {
                     <span className="text-[11px]" style={{ color: 'var(--accent)' }}>
                       {t('plugins.selected', { count: selected.size })}
                     </span>
-                    <button className="btn btn-danger btn-sm" disabled={busy !== null} onClick={() => void doRemoveMany()}>
+                    <button className="btn btn-danger btn-sm" disabled={busy.size > 0} onClick={() => void doRemoveMany()}>
                       <TrashIcon /> {t('plugins.removeSelected')}
                     </button>
                   </>
@@ -260,7 +270,13 @@ export function Plugins(): JSX.Element {
               </div>
             </div>
 
-            {rows.length === 0 ? (
+            {removeManyTask?.running && (
+              <div className="mb-2">
+                <TaskConsole task={removeManyTask} />
+              </div>
+            )}
+
+            {localOwnedRows.length === 0 && directOnlyRows.length === 0 ? (
               <div className="card p-5 text-[13px]" style={{ color: 'var(--muted)' }}>
                 {t('plugins.noLocal', { dir: config?.pluginDir ?? '' })}
               </div>
@@ -304,7 +320,7 @@ export function Plugins(): JSX.Element {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((row) => (
+                    {localOwnedRows.map((row) => (
                       <tr key={row.name} style={{ borderColor: 'var(--border)' }}>
                         <td className="w-8 px-3 py-2 border-b align-top" style={{ borderColor: 'var(--border)' }}>
                           <input
@@ -344,7 +360,9 @@ export function Plugins(): JSX.Element {
                           <td key={c.id} className="px-2 py-2 border-b text-center align-middle" style={{ borderColor: 'var(--border)' }}>
                             <MatrixCell
                               status={cells[row.name]?.[c.id] ?? 'not-installed'}
-                              disabled={busy !== null}
+                              installing={[...busy].some((l) => l.startsWith(`matrix:${row.name}:${c.id}:`))}
+                              removing={[...busy].some((l) => l.startsWith(`matrix:${row.name}:${c.id}:`) && /:(remove|disable)$/.test(l))}
+                              disabled={[...busy].some((l) => l.startsWith(`matrix:${row.name}:${c.id}:`))}
                               menuOpen={menu?.rowName === row.name && menu?.colId === c.id}
                               onOpen={(e) => {
                                 e.stopPropagation()
@@ -362,6 +380,61 @@ export function Plugins(): JSX.Element {
                   </tbody>
                 </table>
               </div>
+            )}
+
+            {/* 直装插件(dsh plugin add 装的,如整合包/直装):与本地持有的插件分开,可折叠 */}
+            {directOnlyRows.length > 0 && (
+              <details className="mt-3">
+                <summary className="cursor-pointer select-none text-[12px] font-medium" style={{ color: 'var(--muted)' }}>
+                  {t('plugins.directGroup', { count: directOnlyRows.length })}
+                </summary>
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full border-collapse text-[12.5px]">
+                    <thead>
+                      <tr>
+                        <th className="text-left font-medium px-3 py-2 border-b" style={{ color: 'var(--muted)', borderColor: 'var(--border)', minWidth: 200 }}>
+                          {t('plugins.matrix.plugin')}
+                        </th>
+                        {columns.map((c) => (
+                          <th key={c.id} className="text-center font-medium px-3 py-2 border-b whitespace-nowrap" style={{ color: 'var(--muted)', borderColor: 'var(--border)' }}>
+                            {c.name}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {directOnlyRows.map((row) => (
+                        <tr key={row.name} style={{ borderColor: 'var(--border)' }}>
+                          <td className="px-3 py-2 border-b align-top" style={{ borderColor: 'var(--border)' }}>
+                            <button className="w-full text-left cursor-pointer select-none" title={t('plugins.matrix.clickForDetail')} onClick={() => setDetail(row)}>
+                              <span className="truncate text-[13px] font-semibold leading-tight" style={{ color: 'var(--text)' }}>{row.displayName}</span>
+                              <div className="text-[11px] mt-0.5 line-clamp-1 leading-tight" style={{ color: 'var(--muted)' }}>
+                                {row.remark || (row.version ? `v${row.version}` : '')}
+                              </div>
+                            </button>
+                          </td>
+                          {columns.map((c) => (
+                            <td key={c.id} className="px-2 py-2 border-b text-center align-middle" style={{ borderColor: 'var(--border)' }}>
+                              <MatrixCell
+                                status={cells[row.name]?.[c.id] ?? 'not-installed'}
+                                installing={[...busy].some((l) => l.startsWith(`matrix:${row.name}:${c.id}:`))}
+                                removing={[...busy].some((l) => l.startsWith(`matrix:${row.name}:${c.id}:`) && /:(remove|disable)$/.test(l))}
+                                disabled={[...busy].some((l) => l.startsWith(`matrix:${row.name}:${c.id}:`))}
+                                menuOpen={menu?.rowName === row.name && menu?.colId === c.id}
+                                onOpen={(e) => { e.stopPropagation(); setMenu(menu?.rowName === row.name && menu?.colId === c.id ? null : { rowName: row.name, colId: c.id }) }}
+                                onClose={() => setMenu(null)}
+                                onAction={(label, fn) => void run(label, fn)}
+                                row={row}
+                                colId={c.id}
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
             )}
 
             <p className="pt-2 text-[11px]" style={{ color: 'var(--muted)' }}>
@@ -408,6 +481,8 @@ function installSourceFor(row: PluginMatrixRow): string {
 function MatrixCell({
   status,
   disabled,
+  installing,
+  removing,
   menuOpen,
   onOpen,
   onClose,
@@ -415,8 +490,10 @@ function MatrixCell({
   row,
   colId
 }: {
-  status: 'not-installed' | 'enabled'
+  status: 'not-installed' | 'installed' | 'enabled'
   disabled: boolean
+  installing: boolean
+  removing: boolean
   menuOpen: boolean
   onOpen: (e: React.MouseEvent) => void
   onClose: () => void
@@ -425,13 +502,46 @@ function MatrixCell({
   colId: string
 }): JSX.Element {
   const { t } = useI18n()
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [menuUp, setMenuUp] = useState(false)
+  // 菜单打开时测量:若向下展开会超出可视底部(滚动容器或视口),改为向上展开,
+  // 避免底部行的操作菜单被容器裁掉一半、要拖滚动条才看得到。
+  useLayoutEffect(() => {
+    if (!menuOpen) return
+    const el = wrapRef.current
+    if (!el) return
+    const menu = el.querySelector<HTMLElement>('.matrix-cell-menu')
+    const h = menu?.offsetHeight ?? 0
+    const r = el.getBoundingClientRect()
+    // 找最近的滚动容器(overflow auto/scroll 的祖先),按它的可视底部判断;
+    // 没找到则用视口底部。取两者较小值,确保任何一边都不被裁切。
+    let container: HTMLElement | null = el.parentElement
+    while (container) {
+      const oy = window.getComputedStyle(container).overflowY
+      if (oy === 'auto' || oy === 'scroll') break
+      container = container.parentElement
+    }
+    const viewBottom = window.innerHeight
+    const containerBottom = container ? container.getBoundingClientRect().bottom : viewBottom
+    setMenuUp(r.bottom + h > Math.min(viewBottom, containerBottom))
+  }, [menuOpen])
 
   const style =
     status === 'enabled'
       ? { color: 'var(--ok)', background: 'color-mix(in srgb, var(--ok) 14%, transparent)' }
-      : { color: 'var(--muted)', background: 'var(--bg-soft)' }
+      : status === 'installed'
+        ? { color: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 14%, transparent)' }
+        : { color: 'var(--muted)', background: 'var(--bg-soft)' }
 
-  const label = status === 'enabled' ? t('plugins.matrix.enabled') : t('plugins.matrix.notInstalled')
+  const label = removing
+    ? t('plugins.matrix.removing')
+    : installing
+      ? t('plugins.matrix.installing')
+      : status === 'enabled'
+        ? t('plugins.matrix.enabled')
+        : status === 'installed'
+          ? t('plugins.matrix.installed')
+          : t('plugins.matrix.notInstalled')
 
   const items: { key: string; label: string; danger?: boolean; fn: () => Promise<unknown> }[] = []
   if (status === 'not-installed') {
@@ -441,15 +551,28 @@ function MatrixCell({
       // 直装行(path 为空)没有本地目录可安装,用其安装 spec 在原实例外复装。
       fn: () => api.installPlugin(colId, installSourceFor(row), row.name)
     })
+  } else if (status === 'installed') {
+    // 已安装未启用:纯启用(不重装),或从该实例移除。
+    items.push({
+      key: 'enable',
+      label: t('plugins.matrix.enable'),
+      fn: () => api.enablePlugin(colId, row.name)
+    })
+    items.push({
+      key: 'remove',
+      label: t('plugins.matrix.remove'),
+      danger: true,
+      // 卸载 = 真正从该实例移除依赖(回到「未安装」),不弹确认框。
+      // 停用(enabled→禁用)才是只移除挂载;卸载应清掉依赖。
+      fn: () => api.uninstallPlugin(colId, row.name)
+    })
   } else {
     items.push({
       key: 'disable',
       label: t('plugins.matrix.disable'),
       danger: true,
-      fn: async () => {
-        if (!window.confirm(t('plugins.disableConfirm', { name: row.name }))) return
-        await api.disablePlugin(colId, row.name)
-      }
+      // 停用 = 只移除挂载(本地源码保留),无害操作,不弹确认框。
+      fn: () => api.disablePlugin(colId, row.name)
     })
     items.push({
       key: 'reinstall',
@@ -459,7 +582,7 @@ function MatrixCell({
   }
 
   return (
-    <div className="relative inline-block">
+    <div ref={wrapRef} className="relative inline-block">
       <button
         className="badge cursor-pointer select-none whitespace-nowrap"
         style={style}
@@ -470,7 +593,10 @@ function MatrixCell({
         {label}
       </button>
       {menuOpen && (
-        <div className="absolute right-0 top-full mt-1 z-20 card p-1 min-w-[110px] text-left" onClick={(e) => e.stopPropagation()}>
+        <div
+          className={`absolute right-0 z-20 card p-1 min-w-[110px] text-left matrix-cell-menu ${menuUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
           {items.map((it) => (
             <button
               key={it.key}
@@ -520,7 +646,7 @@ function PluginDetailModal({
 
   const removeFromLibrary = async (): Promise<void> => {
     const direct = row.path === ''
-    if (!window.confirm(direct ? t('plugins.uninstallAllConfirm', { name: row.displayName }) : t('plugins.removeFromLibraryConfirm', { name: row.displayName }))) return
+    if (!await api.confirm(direct ? t('plugins.uninstallAllConfirm', { name: row.displayName }) : t('plugins.removeFromLibraryConfirm', { name: row.displayName }))) return
     setRemoving(true)
     setErr(null)
     try {
@@ -554,13 +680,22 @@ function PluginDetailModal({
     }
   }
 
+  // 点击背景才关闭。内层按下、在背景松开(拖选文本后鼠标滑出窗口)时,click 会落在
+  // 背景上——此时若正选中文本(显示名称/备注等),不关闭,避免误触。
+  const overlayClick = (e: React.MouseEvent): void => {
+    if (e.target !== e.currentTarget) return
+    const sel = window.getSelection()
+    if (sel && sel.toString().length > 0) return
+    onClose()
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={overlayClick}>
       <div className="card p-5 w-full max-w-[520px] max-h-[85vh] overflow-y-auto" style={{ background: 'var(--panel)' }} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">
             <h3 className="text-[16px] font-semibold leading-tight">{t('plugins.detail.title')}</h3>
-            <div className="mono text-[12px] mt-0.5" style={{ color: 'var(--muted)' }}>
+            <div className="mono text-[12px] mt-0.5 select-text" style={{ color: 'var(--muted)', userSelect: 'text' }}>
               {row.name}
               {row.version ? ` · v${row.version}` : ''}
             </div>
@@ -571,12 +706,12 @@ function PluginDetailModal({
         </div>
 
         {row.description && (
-          <p className="text-[13px] leading-relaxed mb-4" style={{ color: 'var(--muted)' }}>
+          <p className="text-[13px] leading-relaxed mb-4 select-text" style={{ color: 'var(--muted)', userSelect: 'text' }}>
             {row.description}
           </p>
         )}
 
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-4 text-[12px]">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mb-4 text-[12px] select-text" style={{ userSelect: 'text' }}>
           <div className="flex justify-between gap-2">
             <span style={{ color: 'var(--muted)' }}>{t('plugins.detail.version')}</span>
             <span className="mono truncate">{row.version || '—'}</span>
@@ -589,13 +724,18 @@ function PluginDetailModal({
             <span style={{ color: 'var(--muted)' }}>{t('plugins.detail.platform')}</span>
             <span className="mono truncate">{row.platform ?? '—'}</span>
           </div>
-          <div className="flex justify-between gap-2 col-span-2">
+          <div className="flex items-center justify-between gap-2 col-span-2">
             <span className="shrink-0" style={{ color: 'var(--muted)' }}>
               {t('plugins.detail.path')}
             </span>
-            <span className="mono truncate" title={row.path || row.spec}>
-              {row.path || row.spec || '—'}
-            </span>
+            <div className="flex items-center gap-1 min-w-0">
+              <span className="mono truncate select-text" title={row.path || row.spec}>
+                {row.path || row.spec || '—'}
+              </span>
+              {(row.path || row.spec) && (
+                <CopyButton text={row.path || row.spec || ''} title={t('plugins.copyPath')} />
+              )}
+            </div>
           </div>
         </div>
 

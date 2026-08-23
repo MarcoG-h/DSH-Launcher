@@ -5,8 +5,12 @@
 // (green/yellow/red) mirroring dsh's runtime state — the dot is drawn into the
 // bitmap in memory, so there is still no resource file to go missing.
 import { app, BrowserWindow, Menu, nativeImage, Tray } from 'electron'
+import { broadcast } from './bus'
 import * as dshStatus from './dsh-status'
 import { getConfig } from './config'
+import * as harness from './harness'
+import * as instances from './instances'
+import * as runtime from './runtime'
 import { t } from './i18n'
 
 // 32×32 RGBA: white disc + the little black whale on top — matches the
@@ -135,10 +139,43 @@ function dotIcon(light: dshStatus.DshLight): Electron.NativeImage {
 
 /** Right-click menu; the first line is the live dsh status (disabled). */
 function buildMenu(light: dshStatus.DshLight): Electron.Menu {
-  return Menu.buildFromTemplate([
+  const cfg = getConfig()
+  const shown = cfg.instances.filter((i) => i.enabled !== false)
+  const items: Electron.MenuItemConstructorOptions[] = [
     { label: statusLine(light), enabled: false, icon: dotIcon(light) },
     { type: 'separator' },
     { label: t('显示主界面', 'Show Launcher'), click: showLauncher },
+    { type: 'separator' },
+  ]
+  // 实例列表(参照 deepseek-harness-desktop 的托盘面板):点击切换活动实例并打开窗口。
+  for (const inst of shown) {
+    const st = harness.getState(inst.id)
+    const running = st.status === 'running' || st.status === 'external'
+    items.push({
+      label: `${running ? '●' : '○'} ${inst.name}${running ? ` — ${st.port}` : ''}`,
+      click: () => {
+        instances.setActiveInstance(inst.id)
+        // 广播实例列表,让 renderer 的活动实例/视图跟着切换,而不只是打开窗口。
+        broadcast({ type: 'instances', instances: instances.getInstances(), activeInstanceId: inst.id })
+        showLauncher()
+      }
+    })
+  }
+  if (shown.length > 0) items.push({ type: 'separator' })
+  items.push(
+    // 检查更新:打开窗口(进度显示在设置页任务区)并触发更新内置 dsh。
+    {
+      label: t('检查更新', 'Check for updates'),
+      click: () => { showLauncher(); void runtime.updateRuntime() }
+    },
+    // 设置:打开窗口并导航到设置页。
+    {
+      label: t('设置', 'Settings'),
+      click: () => {
+        showLauncher()
+        broadcast({ type: 'launcher-page', page: 'settings' })
+      }
+    },
     { type: 'separator' },
     {
       label: t('退出', 'Quit'),
@@ -147,7 +184,8 @@ function buildMenu(light: dshStatus.DshLight): Electron.Menu {
         app.quit()
       }
     }
-  ])
+  )
+  return Menu.buildFromTemplate(items)
 }
 
 export function initTray(window: BrowserWindow): void {

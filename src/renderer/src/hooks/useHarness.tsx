@@ -106,6 +106,8 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
         setDshUpdate({ latest: e.latest, current: e.current, update: e.latest !== null && e.current !== null && e.latest !== e.current })
       } else if (e.type === 'launcher-update') {
         setLauncherUpdate({ latest: e.latest, current: e.current, url: e.url, update: e.update })
+      } else if (e.type === 'logs-cleared') {
+        setLogs({})
       } else if (e.type === 'task') {
         const t = e.task
         setTasks((prev) => {

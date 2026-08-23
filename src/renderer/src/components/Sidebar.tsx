@@ -145,7 +145,8 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
               const pulse = STATUS_PULSE[st] === true
               // Start/stop mirrors the Dashboard control: anything but a clean
               // idle/error shows stop (incl. starting/stopping/external).
-              const canStop = st !== 'stopped' && st !== 'error'
+              // error 也允许停止:异常报错但实例可能仍在运行,需要能点「停止」清理残留。
+              const canStop = st !== 'stopped'
               const canOpenUi = st === 'running' || st === 'external'
               // The instance toggles between running embedded in the launcher and
               // running in a separate (popped-out) child window.

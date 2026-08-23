@@ -3,6 +3,8 @@ import type { DshLauncherApi, LauncherEvent } from '../shared/types'
 
 const api: DshLauncherApi = {
   getState: () => ipcRenderer.invoke('state:get'),
+  clearLogs: () => ipcRenderer.invoke('logs:clear'),
+  confirm: (message) => ipcRenderer.invoke('confirm', message),
   startInstance: (instanceId) => ipcRenderer.invoke('harness:start', instanceId),
   stopInstance: (instanceId) => ipcRenderer.invoke('harness:stop', instanceId),
   restartInstance: (instanceId) => ipcRenderer.invoke('harness:restart', instanceId),
@@ -20,6 +22,8 @@ const api: DshLauncherApi = {
   setPluginMeta: (name, meta) => ipcRenderer.invoke('plugins:setMeta', name, meta),
   installPlugin: (instanceId, spec, name) => ipcRenderer.invoke('plugins:install', instanceId, spec, name),
   disablePlugin: (instanceId, name) => ipcRenderer.invoke('plugins:disable', instanceId, name),
+  enablePlugin: (instanceId, name) => ipcRenderer.invoke('plugins:enable', instanceId, name),
+  uninstallPlugin: (instanceId, name) => ipcRenderer.invoke('plugins:uninstall', instanceId, name),
   updatePlugin: (instanceId, name) => ipcRenderer.invoke('plugins:update', instanceId, name),
   removeFromLibrary: (name) => ipcRenderer.invoke('plugins:removeFromLibrary', name),
   removeFromLibraryMany: (names) => ipcRenderer.invoke('plugins:removeFromLibraryMany', names),
@@ -28,6 +32,7 @@ const api: DshLauncherApi = {
   downloadHarness: () => ipcRenderer.invoke('download:harness'),
   downloadPlugin: (url, subdir, instanceId) => ipcRenderer.invoke('download:plugin', url, subdir, instanceId),
   installBundle: (bundleId, options) => ipcRenderer.invoke('bundles:install', bundleId, options),
+  bundles: () => ipcRenderer.invoke('bundles:list'),
   installRuntime: () => ipcRenderer.invoke('runtime:install'),
   updateRuntime: () => ipcRenderer.invoke('runtime:update'),
   getBalance: () => ipcRenderer.invoke('balance:get'),

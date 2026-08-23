@@ -1,5 +1,6 @@
-import { dialog, ipcMain, shell } from 'electron'
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import * as balance from './balance'
+import * as browserGuard from './browser-guard'
 import { broadcast } from './bus'
 import { getConfig, setConfig } from './config'
 import { t } from './i18n'
@@ -28,6 +29,28 @@ export function registerIpc(): void {
     config: getConfig()
   }))
 
+  ipcMain.handle('logs:clear', () => {
+    harness.clearAllLogs()
+    return true
+  })
+
+  // 原生 window.confirm 在 Electron 中会阻塞渲染进程并夺走焦点/IME,关闭后输入框
+  // 无法正常聚焦输入。改用 main 进程的 native dialog(不阻塞、无焦点问题)。
+  ipcMain.handle('confirm', async (_e, message: string) => {
+    const win = BrowserWindow.getFocusedWindow()
+    const opts = {
+      type: 'question' as const,
+      buttons: [t('取消', 'Cancel'), t('确定', 'OK')],
+      defaultId: 1,
+      cancelId: 0,
+      message: String(message)
+    }
+    const r = win && !win.isDestroyed()
+      ? await dialog.showMessageBox(win, opts)
+      : await dialog.showMessageBox(opts)
+    return r.response === 1
+  })
+
   // --- instance lifecycle ---
   ipcMain.handle('harness:start', (_e, instanceId: string) => harness.startInstance(String(instanceId)))
   ipcMain.handle('harness:stop', (_e, instanceId: string) => harness.stopInstance(String(instanceId)))
@@ -37,6 +60,8 @@ export function registerIpc(): void {
     const id = String(instanceId || instances.getActiveInstance().id)
     const port = harness.getState(id).port
     if (port <= 0) return false
+    // 记录「用户手动打开」:浏览器守卫会跳过该端口,不会自动关闭它。
+    browserGuard.markUserOpened(port)
     return shell.openExternal(`http://127.0.0.1:${port}`)
   })
   ipcMain.handle('harness:openInstanceWindow', (_e, instanceId: string) => {
@@ -119,6 +144,18 @@ export function registerIpc(): void {
     markPendingRestart(String(instanceId), r.ok)
     return r
   })
+  ipcMain.handle('plugins:enable', async (_e, instanceId: string, name: string) => {
+    const { home, profile } = profileFor(String(instanceId))
+    const r = await plugins.enable(home, profile, String(name))
+    markPendingRestart(String(instanceId), r.ok)
+    return r
+  })
+  ipcMain.handle('plugins:uninstall', async (_e, instanceId: string, name: string) => {
+    const { home, profile } = profileFor(String(instanceId))
+    const r = await plugins.uninstall(home, profile, String(name))
+    markPendingRestart(String(instanceId), r.ok)
+    return r
+  })
   ipcMain.handle('plugins:update', async (_e, instanceId: string, name: string) => {
     const { home, profile } = profileFor(String(instanceId))
     const r = await plugins.update(home, profile, String(name))
@@ -126,16 +163,26 @@ export function registerIpc(): void {
     return r
   })
   ipcMain.handle('plugins:removeFromLibrary', async (_e, name: string) => {
+    // 先停运行中的实例,避免本地库文件被进程占用导致删除失败(移除会重建依赖)。
+    for (const inst of instances.getInstances()) {
+      const st = harness.getState(inst.id)
+      if (st.status === 'running' || st.status === 'external') await harness.stopInstance(inst.id)
+    }
     const r = await plugins.removeFromLibrary(String(name))
     for (const id of r.affected ?? []) harness.markPendingRestart(id)
     return r
   })
   ipcMain.handle('plugins:removeFromLibraryMany', async (_e, names: string[]) => {
     const list = (Array.isArray(names) ? names : []).map(String)
+    for (const inst of instances.getInstances()) {
+      const st = harness.getState(inst.id)
+      if (st.status === 'running' || st.status === 'external') await harness.stopInstance(inst.id)
+    }
     const r = await plugins.removeFromLibraryMany(list)
     for (const id of r.affected ?? []) harness.markPendingRestart(id)
     return r
   })
+  ipcMain.handle('bundles:list', async () => plugins.fetchRemoteBundles())
   ipcMain.handle('bundles:install', (_e, bundleId: string, options?: { retrySpecs?: string[]; homeMode?: 'shared' | 'isolated'; home?: string }) => {
     const o = options ?? {}
     return plugins.installBundle(String(bundleId), {

@@ -103,6 +103,8 @@ export interface LauncherConfig {
   activeInstanceId: string
   /** Per-plugin user metadata (display-name override + remark), keyed by package name. */
   pluginMeta?: Record<string, PluginMeta>
+  /** 上次窗口位置/大小(用于恢复);displayCount 记录当时的显示器数量,变化则不用恢复。 */
+  windowBounds?: { x: number; y: number; width: number; height: number; displayCount: number }
 }
 
 export interface InstalledPlugin {
@@ -117,7 +119,7 @@ export interface InstalledPlugin {
 }
 
 /** Two-state plugin status: a plugin is either enabled for an instance or absent from it. */
-export type LocalStatus = 'not-installed' | 'enabled'
+export type LocalStatus = 'not-installed' | 'installed' | 'enabled'
 
 export interface LocalPlugin {
   name: string
@@ -137,7 +139,7 @@ export interface PluginListResult {
 }
 
 /** Plugin×instance matrix: rows are local plugins, columns are instances. */
-export type PluginCellStatus = 'not-installed' | 'enabled'
+export type PluginCellStatus = 'not-installed' | 'installed' | 'enabled'
 
 export interface PluginMatrixColumn {
   id: string
@@ -190,6 +192,8 @@ export type LauncherEvent =
   | { type: 'popup'; instanceId: string; open: boolean }
   | { type: 'dsh-update'; latest: string | null; current: string | null }
   | { type: 'launcher-update'; latest: string | null; current: string; url: string | null; update: boolean }
+  | { type: 'logs-cleared' }
+  | { type: 'launcher-page'; page: 'settings' }
 
 export interface BootstrapState {
   /** state per instance id. */
@@ -330,11 +334,20 @@ export interface BundleInstallOptions {
  * A plugin that ships with a recommended bundle (整合包). 有公开源,安装时用
  * `dsh plugin add <spec>` 直装最新版;`name` 仅用于展示。
  */
+/** 插件包插件项(对齐 dsh-plugin-pack 规范):plugin = 宿主/基础,extension = 扩展。 */
 export interface BundlePlugin {
+  /** 插件 id(包内唯一,供 requires 引用)。缺省用 name。 */
+  id?: string
   /** 展示名(去掉 scope / dsh- 前缀后更易读)。 */
   name?: string
-  /** `dsh plugin add <spec>` 的源:npm 包名或 `github:owner/repo`。 */
+  /** 插件种类:plugin(宿主/基础)或 extension(扩展,需 requires 指向宿主)。缺省 plugin。 */
+  kind?: 'plugin' | 'extension'
+  /** 依赖的包内插件 id(extension 用)。 */
+  requires?: string[]
+  /** `dsh plugin add <spec>` 的源:npm 包名、`github:owner/repo` 或 URL。 */
   spec?: string
+  /** 源码仓库 URL(展示用)。 */
+  repository?: string
   /** 插件的中文功能简介(详情弹窗展示)。 */
   description?: string
   /** 额外透传给 `dsh plugin add` 的参数(原样追加,用于绕过不可满足的 peer 依赖等)。 */
@@ -342,16 +355,20 @@ export interface BundlePlugin {
 }
 
 /**
- * A recommended bundle (整合包):社区插件组合已固化在 shared/bundles.ts。
+ * A recommended bundle (整合包):对齐 dsh-plugin-pack 的清单结构。
  * 下载时新建实例,并逐个 `dsh plugin add` 直装最新版。
  */
 export interface RecommendedBundle {
+  /** dsh-plugin-pack schema 版本。 */
+  schemaVersion?: number
   id: string
   name: string
+  version?: string
   description: string
+  license?: string
   /** Base name for the new instance's profile (defaults to `web`). */
   profileBase?: string
-  /** 社区插件 —— 计入数量,安装时逐个 `dsh plugin add` 直装。 */
+  /** 插件清单 —— 计入数量,安装时逐个 `dsh plugin add` 直装。 */
   community: BundlePlugin[]
 }
 
@@ -389,6 +406,8 @@ export interface DshLauncherApi {
   installPlugin(instanceId: string, spec: string, name?: string): Promise<CmdResult>
   /** Uninstall a plugin from an instance's profile (removes it from both dependencies and bundles). */
   disablePlugin(instanceId: string, name: string): Promise<CmdResult>
+  enablePlugin(instanceId: string, name: string): Promise<CmdResult>
+  uninstallPlugin(instanceId: string, name: string): Promise<CmdResult>
   /** Reinstall/update an installed plugin (git pull + reinstall for `file:` plugins, `dsh plugin up` otherwise). */
   updatePlugin(instanceId: string, name: string): Promise<CmdResult>
   /** Remove a plugin from the local library entirely: delete its source folder and uninstall it from every instance. */
@@ -432,4 +451,7 @@ export interface DshLauncherApi {
   /** Fired when the floating orb is clicked — the launcher should expand its sidebar. */
   onOrbClicked(cb: () => void): () => void
   onEvent(cb: (e: LauncherEvent) => void): () => void
+  clearLogs(): Promise<boolean>
+  confirm(message: string): Promise<boolean>
+  bundles(): Promise<{ bundles: RecommendedBundle[]; connected: boolean }>
 }

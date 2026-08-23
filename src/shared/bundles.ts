@@ -37,7 +37,7 @@ export function bundleTaskLabel(bundle: RecommendedBundle): string {
 const STARTER_COMMUNITY: BundlePlugin[] = [
   { name: '@liustack/modlens', spec: 'github:liustack/modlens', description: '给纯文本模型添加视觉能力,粘贴图片即可进行问答' },
   { name: '@omdsh-dev/dsh-genui', spec: 'github:omdsh-dev/dsh-genui', description: '在 AI 回复中内联渲染图表、表单、Mermaid、3D 等交互 UI 组件' },
-  { name: 'dsh-at-file', spec: 'github:omdsh-dev/dsh-at-file', description: '输入 @ 搜索并引用工作区文件路径,不注入文件内容' },
+  { name: 'dsh-at-file', spec: 'dsh-at-file', description: '输入 @ 搜索并引用工作区文件路径,不注入文件内容' },
   { name: '@omdsh-dev/dsh-annotation', spec: 'github:omdsh-dev/dsh-annotation', description: '选中回复文本加批注随消息发送,模型按编号逐条回复批注' },
   { name: 'dsh-status-rotator', spec: 'github:01Virex/dsh-status-rotator', description: '定时轮播聊天状态提示语,短语可在设置面板自定义' },
   // vectorize-io/hindsight 是 monorepo,github: 直装只会取到无 dsh 字段的根包 → 走 npm。
@@ -72,8 +72,8 @@ const COMMUNITY_BOOST: BundlePlugin[] = [
   { name: 'dsh-undo-savepoint', spec: 'github:lire1131/dsh-undo-plugin', description: '崩溃救援:撤销配置与插件代码改动、密钥安全快照、一键安全模式' },
   { name: 'dsh-topbar-manager', spec: 'github:baihejiangnan/dsh-topbar-manager', description: '顶部工具栏管理:检查并控制其他插件添加的按钮显示/隐藏' },
   { name: '@dsh-external/dsh-side-session', spec: 'github:hzhz314159/dsh-side-session', description: '临时会话:独立悬浮窗,自动导入主对话上下文追问,不污染主会话' },
-  // dsh-at-file 走 GitHub tag 固定版本(与 repo 直装等效),避免 spec 歧义。
-  { name: 'dsh-at-file', spec: 'https://github.com/omdsh-dev/dsh-at-file/archive/refs/tags/v0.6.3.tar.gz', description: '输入 @ 搜索并引用工作区文件路径,不注入文件内容' },
+  // dsh-at-file 已发布到 npm(0.6.3):用 npm 源,避免 GitHub tarball 在国内被墙卡住安装。
+  { name: 'dsh-at-file', spec: 'dsh-at-file', description: '输入 @ 搜索并引用工作区文件路径,不注入文件内容' },
   { name: '@omdsh-dev/dsh-genui', spec: 'github:omdsh-dev/dsh-genui', description: '在 AI 回复中内联渲染图表、表单、Mermaid、3D 等交互 UI 组件' },
   // 经实测存在(dsh 字段为对象);npm 上无此包名,勿按 @dsh-external/dsh-automation 裸装。
   { name: '@dsh-external/dsh-automation', spec: 'github:titanwings/dsh-automation', description: '自动化:让 Coding 任务按计划在全新 Agent Session 中运行' },
@@ -90,14 +90,20 @@ const COMMUNITY_BOOST: BundlePlugin[] = [
 /** 推荐整合包清单:EAC 已下架。 */
 export const RECOMMENDED_BUNDLES: RecommendedBundle[] = [
   {
+    schemaVersion: 1,
     id: 'tp',
     name: '新手起步套装',
+    version: '1.0.0',
+    license: 'MIT',
     description: `社区精选入门包(${STARTER_COMMUNITY.length} 插件):图片问答与 OCR 视觉、内联图表/表单 UI、@文件引用、消息批注、多工具对话导入、桌面通知、长期编码记忆、余额与峰谷监控、状态轮播、侧边栏工作台,一键直装快速起步。`,
     community: [...STARTER_COMMUNITY]
   },
   {
+    schemaVersion: 1,
     id: 'boost',
     name: '社区精选增强包',
+    version: '1.0.0',
+    license: 'MIT',
     description: `增强进阶包(${COMMUNITY_BOOST.length} 插件):会话右键菜单与临时追问、插件市场/管理/守护/健康检查、超长上下文与腾讯云记忆、文件改动审阅与检查点回滚、余额与高峰成本管控、自动折叠工具卡片、顶栏/导航/移动端界面增强,深度定制你的 DSH。`,
     community: [...COMMUNITY_BOOST]
   }
