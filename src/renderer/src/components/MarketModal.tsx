@@ -100,7 +100,7 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-6"
+      className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-6"
       style={{ background: 'rgba(0,0,0,0.45)' }}
       onClick={onClose}
     >

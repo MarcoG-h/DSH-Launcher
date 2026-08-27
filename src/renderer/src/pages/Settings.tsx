@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import { api, type LauncherConfig } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
+import { useTheme, ACCENT_PRESETS } from '../hooks/useTheme'
 import { useI18n } from '../i18n'
 import { MARKET_SOURCES } from '../../../shared/plugin-sources'
 import type { MarketSourceId } from '../../../shared/types'
@@ -28,6 +29,54 @@ function Field({ label, value, onChange, mono = true, hint }: { label: string; v
 export function Settings(): JSX.Element {
   const { config, saveConfig, tasks, refresh, dshUpdate, states, instances } = useHarness()
   const { t, lang } = useI18n()
+  const { theme, style, accent, bgImage, toggleTheme, setStyle, setAccent, setBgImage } = useTheme()
+  const [bgError, setBgError] = useState<string | null>(null)
+
+  const onBgUpload = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!/^image\/(jpeg|png)$/.test(file.type)) {
+      setBgError(t('settings.bgTypeError'))
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setBgError(t('settings.bgTooLarge'))
+      return
+    }
+    // 关键:压缩到最长边 1920 再存 data URL。直接存原图 base64 常达几 MB,
+    // 会因 CSS url() 过长被 Chromium 丢弃、且撑爆 localStorage 无法持久化
+    // (预览能看到、界面背景却显示不出来的根因)。
+    const objectUrl = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = (): void => {
+      try {
+        const MAX = 2560
+        const scale = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight))
+        const w = Math.max(1, Math.round(img.naturalWidth * scale))
+        const h = Math.max(1, Math.round(img.naturalHeight * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) throw new Error('no canvas ctx')
+        ctx.drawImage(img, 0, 0, w, h)
+        // 一律转 JPEG:PNG 无损编码在 2560px 下 data URL 可达数 MB,var()/持久化都扛不住。
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.82)
+        setBgImage(dataUrl)
+        setBgError(null)
+      } catch {
+        setBgError(t('settings.bgReadError'))
+      } finally {
+        URL.revokeObjectURL(objectUrl)
+      }
+    }
+    img.onerror = (): void => {
+      setBgError(t('settings.bgReadError'))
+      URL.revokeObjectURL(objectUrl)
+    }
+    img.src = objectUrl
+    e.target.value = ''
+  }
   const [tab, setTab] = useState<'dsh' | 'system'>('dsh')
   const [form, setForm] = useState<Partial<LauncherConfig>>({})
   const [busy, setBusy] = useState<string | null>(null)
@@ -259,6 +308,80 @@ export function Settings(): JSX.Element {
 
       {tab === 'system' && (
       <section className="space-y-4">
+        {/* 外观:毛玻璃 / 扁平化 + 主色调 */}
+        <div className="panel p-5 space-y-4">
+          <div className="text-[14px] font-semibold">{t('settings.appearance')}</div>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="label">{t('settings.uiStyle')}</div>
+              <div className="text-[12px]" style={{ color: 'var(--muted)' }}>{t('settings.uiStyleHint')}</div>
+            </div>
+            <div className="flex rounded-lg p-1 shrink-0" style={{ background: 'var(--bg-soft)', border: '1px solid var(--border)' }}>
+              {(['flat', 'glass'] as const).map((s) => (
+                <button
+                  key={s}
+                  className="btn btn-sm"
+                  style={style === s
+                    ? { background: 'var(--accent)', color: '#fff' }
+                    : { background: 'transparent', color: 'var(--muted)' }}
+                  onClick={() => setStyle(s)}
+                >
+                  {s === 'glass' ? t('settings.styleGlass') : t('settings.styleFlat')}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="label">{t('settings.accentColor')}</div>
+            <div className="flex items-center gap-2 flex-wrap mt-1">
+              {ACCENT_PRESETS.map((c) => (
+                <button
+                  key={c}
+                  className="w-6 h-6 rounded-full cursor-pointer transition-transform hover:scale-110"
+                  style={{ background: c, outline: accent === c ? '2px solid var(--text)' : 'none', outlineOffset: 2 }}
+                  onClick={() => setAccent(c)}
+                  title={c}
+                />
+              ))}
+              <input
+                type="color"
+                value={accent}
+                onChange={(e) => setAccent(e.target.value)}
+                className="w-7 h-7 rounded cursor-pointer border-none"
+                title={t('settings.accentCustom')}
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="label">{t('settings.themeMode')}</div>
+            <button className="btn btn-ghost btn-sm" onClick={toggleTheme}>
+              {theme === 'dark' ? `🌙 ${t('settings.themeDark')}` : `☀️ ${t('settings.themeLight')}`}
+            </button>
+          </div>
+          <div>
+            <div className="label">{t('settings.backgroundImage')}</div>
+            <div className="text-[12px] mt-0.5" style={{ color: 'var(--muted)' }}>{t('settings.backgroundImageHint')}</div>
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              <label className="btn btn-ghost btn-sm cursor-pointer">
+                {t('settings.bgUpload')}
+                <input type="file" accept="image/jpeg,image/png" className="hidden" onChange={onBgUpload} />
+              </label>
+              {bgImage && (
+                <>
+                  <div
+                    className="w-16 h-10 rounded-lg overflow-hidden shrink-0 border"
+                    style={{ borderColor: 'var(--border)', background: `center/cover no-repeat url(${bgImage})` }}
+                    title={t('settings.bgPreview')}
+                  />
+                  <button className="btn btn-ghost btn-sm" onClick={() => setBgImage('')}>
+                    {t('settings.bgClear')}
+                  </button>
+                </>
+              )}
+            </div>
+            {bgError && <div className="text-[12px] mt-1" style={{ color: 'var(--err)' }}>{bgError}</div>}
+          </div>
+        </div>
         <div className="panel p-5 space-y-5">
           {/* app-level options */}
           <div className="grid sm:grid-cols-2 gap-4">

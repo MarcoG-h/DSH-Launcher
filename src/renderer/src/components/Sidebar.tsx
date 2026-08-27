@@ -48,7 +48,7 @@ const STATUS_PULSE: Record<string, boolean> = {
 
 export function Sidebar({ view, setView, collapsed, setCollapsed, width }: SidebarProps): JSX.Element {
   const { state, config, runningTasks, instances, states, activeInstanceId, poppedOut, setActiveInstance, launcherUpdate } = useHarness()
-  const [theme, toggleTheme] = useTheme()
+  const { theme, toggleTheme } = useTheme()
   const { lang, t, setLang, statusLabel } = useI18n()
   // Hidden instances stay out of the sidebar — manage them from the Instances page.
   const visible = instances.filter(i => i.enabled !== false)
@@ -85,11 +85,12 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
 
   return (
     <aside
-      className="shrink-0 flex flex-col border-r overflow-hidden transition-[width] duration-150"
+      className="app-sidebar shrink-0 flex flex-col border-r overflow-hidden transition-[width] duration-150"
+      data-collapsed={collapsed || undefined}
       style={{
         width,
         borderColor: hidden ? 'transparent' : 'var(--border)',
-        background: 'var(--panel)',
+        // 背景交给 CSS(.app-sidebar):扁平模式 var(--panel),毛玻璃模式液态玻璃 + 主色光晕。
         // easeOutCubic — must match the DSH view animation in App.tsx so the
         // native view slides in step with the rail.
         transitionTimingFunction: 'cubic-bezier(0.215, 0.61, 0.355, 1)'
@@ -232,10 +233,11 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
                 setView(item.id)
               }}
               title={collapsed ? item.label : undefined}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[9px] text-[13px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-[9px] text-[13px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              data-active={active}
               style={{
                 color: active ? 'var(--accent)' : 'var(--text)',
-                background: active ? 'var(--accent-soft)' : 'transparent',
+                // 背景交给 CSS:.nav-item[data-active] 扁平用 accent-soft,毛玻璃用液态玻璃卡片。
                 justifyContent: collapsed ? 'center' : 'flex-start',
                 paddingLeft: collapsed ? 0 : 12,
                 paddingRight: collapsed ? 0 : 12

@@ -5,7 +5,6 @@ import { I18nProvider, useI18n } from './i18n'
 import { api } from './lib/api'
 import { Sidebar, type PageId } from './components/Sidebar'
 import { SplashOverlay } from './components/SplashOverlay'
-import { TopBar } from './components/TopBar'
 import { Dashboard } from './pages/Dashboard'
 import { Instances } from './pages/Instances'
 import { Plugins } from './pages/Plugins'
@@ -16,13 +15,6 @@ const SIDEBAR_COLLAPSED = 56
 
 function Shell(): JSX.Element {
   const { state, states, config, activeInstanceId } = useHarness()
-  const { t } = useI18n()
-  const TITLES: Record<PageId, string> = {
-    dashboard: t('nav.dashboard'),
-    instances: t('nav.instances'),
-    plugins: t('nav.plugins'),
-    settings: t('nav.settings')
-  }
   const [view, setView] = useState<PageId | 'dsh'>('dashboard')
   const [collapsed, setCollapsed] = useState(false)
   // The startup splash plays inside this window; the DSH view (a native child,
@@ -186,7 +178,6 @@ function Shell(): JSX.Element {
         width={dshWidth}
       />
       <div className="flex-1 flex flex-col min-w-0">
-        {!inDsh && <TopBar title={TITLES[page]} />}
         <main className={`flex-1 ${inDsh ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           {inDsh ? null : page === 'dashboard' ? (
             <Dashboard />

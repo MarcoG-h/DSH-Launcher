@@ -60,7 +60,7 @@ export function LogConsole({ height = '520px' }: { height?: string }): React.JSX
     <div className="card overflow-hidden">
       <div
         className="flex items-center gap-3 px-4 py-2.5 border-b"
-        style={{ borderColor: 'var(--border)', background: 'var(--card)' }}
+        style={{ borderColor: 'var(--border)' }}
       >
         <div className="flex gap-1.5">
           <span className="w-3 h-3 rounded-full" style={{ background: '#ff5f57' }} />

@@ -12,7 +12,7 @@ import { getInstance, getInstances, ensureWorkspace, instanceDshHome, stripBomIf
 import { t } from './i18n'
 import { bundledEnv, currentDshVersion, resolveBundledDshBin, resolveBundledNode } from './runtime'
 import { broadcast } from './bus'
-import { ensureRuntimeLinks } from './plugins'
+import { ensureRuntimeLinks, healBrokenDeps, missingProfilePlugin, removeBrokenPlugin } from './plugins'
 import type { DshInstance, HarnessState, LauncherConfig, LogLine } from '../shared/types'
 
 const MAX_LOG = 6000
@@ -37,6 +37,8 @@ interface Runtime {
   effectivePort: number
   /** Last time the child produced any output (for the stuck-detection grace period). */
   lastOutputAt: number
+  /** 启动失败自愈是否已重试(每次 start 只自愈重试一次,防止损坏插件连环重试死循环)。 */
+  healRetried: boolean
 }
 
 // Startup timeout is not a hard wall-clock deadline: dsh cold boots (source
@@ -81,7 +83,8 @@ function ensureRuntime(id: string): Runtime {
       stoppedAt: 0,
       pending: { stdout: '', stderr: '' },
       effectivePort: inst?.port ?? 0,
-      lastOutputAt: 0
+      lastOutputAt: 0,
+      healRetried: false
     }
     runtimes.set(id, rt)
   }
@@ -268,6 +271,8 @@ export async function startInstance(id: string): Promise<{ ok: boolean; error?: 
 async function startInstanceInner(inst: DshInstance, rt: Runtime): Promise<{ ok: boolean; error?: string }> {
   const cfg = getConfig()
   const home = instanceDshHome(inst)
+  // 每次启动(含自动重试)都重新获得一次「启动失败自愈重试」的机会。
+  rt.healRetried = false
   // 独立 home 缺失 → 快速失败(纯解析、不兜底,防止静默回退到共享 home 的隐蔽错位)。
   if (inst.dshHome != null && !existsSync(home)) {
     return { ok: false, error: t(`实例的独立 DSH_HOME 不存在(可能已被删除): ${home}`, `Instance's isolated DSH_HOME is missing (may have been deleted): ${home}`) }
@@ -293,6 +298,17 @@ async function startInstanceInner(inst: DshInstance, rt: Runtime): Promise<{ ok:
     pushLine(rt, 'stderr', t(`[launcher] 检测到缺失的 profile,已自动补建: ${inst.profile}`, `[launcher] Missing profile detected; auto-created: ${inst.profile}`))
   } else {
     ensureProfile(inst.profile, home)
+  }
+  // 启动前自愈:清理残留/损坏的插件依赖(下载失败留下的空壳目录、缺入口的 git 源码
+  // 残留等),否则 dsh 启动时 include-loader 导入残缺包会让整个 profile 崩掉。
+  // 幂等、毫秒级;只动损坏项,失败只记日志不阻塞启动。
+  try {
+    const healed = healBrokenDeps(home, inst.profile)
+    if (healed.length > 0) {
+      pushLine(rt, 'stderr', t(`[launcher] 已自动移除损坏的插件残留: ${healed.join(', ')}`, `[launcher] Auto-removed broken plugin residue: ${healed.join(', ')}`))
+    }
+  } catch (e) {
+    pushLine(rt, 'stderr', t(`[launcher] 插件自愈失败(不阻塞启动): ${String(e)}`, `[launcher] Plugin self-heal failed (does not block startup): ${String(e)}`))
   }
   let plan: LaunchPlan
   try {
@@ -383,14 +399,34 @@ async function startInstanceInner(inst: DshInstance, rt: Runtime): Promise<{ ok:
     stopPortProbe(rt)
     clearStartTimer(rt)
     if (!rt.stopping) {
-      // Exited on its own.
-      if (rt.state.status === 'running' || rt.state.status === 'starting') {
-        patch(rt, { status: 'error', pid: null, ready: false, exitCode: code, lastError: code === 0 ? null : t('进程意外退出', 'Process exited unexpectedly') })
+      // Exited on its own. 清空 startedAt,让「运行时长」随停止归零,不再误导。
+      const wasStarting = rt.state.status === 'starting'
+      if (rt.state.status === 'running' || wasStarting) {
+        patch(rt, { status: 'error', pid: null, ready: false, exitCode: code, startedAt: null, lastError: code === 0 ? null : t('进程意外退出', 'Process exited unexpectedly') })
       } else {
-        patch(rt, { status: 'stopped', pid: null, ready: false, exitCode: code })
+        patch(rt, { status: 'stopped', pid: null, ready: false, exitCode: code, startedAt: null })
+      }
+      // 启动失败自愈:boot 阶段退出且报「找不到某 profile 插件」→ 移除该插件并自动
+      // 重试一次(healRetried 守卫,防止连环损坏时无限重试)。运行中途崩溃不算,避免
+      // 误删导致问题变复杂。
+      if (code !== 0 && wasStarting && !rt.healRetried) {
+        rt.healRetried = true
+        const stderr = rt.log.filter((l) => l.stream === 'stderr').map((l) => l.line).join('\n')
+        const missing = missingProfilePlugin(home, inst.profile, stderr)
+        if (missing) {
+          let removed = false
+          try {
+            removed = removeBrokenPlugin(home, inst.profile, missing)
+          } catch { /* 移除失败则保持当前报错状态,交由用户处理 */ }
+          // 只有确实移除成功才自动重试,防止无法修复时无限重试。
+          if (removed) {
+            pushLine(rt, 'stderr', t(`[launcher] 检测到损坏的插件「${missing}」,已自动移除并重新启动…`, `[launcher] Detected broken plugin "${missing}"; auto-removed it and restarting…`))
+            setTimeout(() => { void startInstance(inst.id) }, 800)
+          }
+        }
       }
     } else {
-      patch(rt, { status: 'stopped', pid: null, ready: false, exitCode: code })
+      patch(rt, { status: 'stopped', pid: null, ready: false, exitCode: code, startedAt: null })
       rt.stopping = false
     }
   })

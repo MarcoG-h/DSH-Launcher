@@ -133,6 +133,11 @@ if (!gotTheLock) {
     registerIpc()
     dshStatus.init()
     ensureShortcuts()
+    // 启动时全 profile 健康修复:移除插件树里悬空的引用(包已从本地库/依赖删除但
+    // cordis.patch.yml 还挂着),防止下次启动时 include-loader 导入不存在的包崩溃。
+    try {
+      plugins.repairAllProfiles()
+    } catch { /* 修复失败不阻塞启动 */ }
     // 后台检查官方 dsh 是否有新版本(不阻塞启动,网络失败静默)。结果广播给 UI。
     void runtime.checkDshUpdate().then((r) => broadcast({ type: 'dsh-update', latest: r.latest, current: r.current }))
     // 提示式更新:后台检查 DSH-Launcher 自身是否有新版 Release(网络失败静默)。

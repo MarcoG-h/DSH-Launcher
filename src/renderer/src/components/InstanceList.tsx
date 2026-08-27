@@ -37,7 +37,9 @@ function InstanceRow({
   const st = s?.status ?? 'stopped'
   const running = st !== 'stopped' && st !== 'error'
   const canRestart = st === 'running' || st === 'external'
-  const uptime = s?.startedAt ? fmtUptime(Math.max(0, now - s.startedAt)) : null
+  // 只在实例实际运行时显示运行时长(stopped/error 时 startedAt 已由主进程清空,
+  // 这里再加一层运行态守卫,避免旧状态残留导致停止后时间继续走)。
+  const uptime = running && s?.startedAt ? fmtUptime(Math.max(0, now - s.startedAt)) : null
   const port = s && s.port > 0 ? s.port : inst.port
 
   return (

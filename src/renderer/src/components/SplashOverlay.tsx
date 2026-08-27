@@ -53,7 +53,7 @@ const ATTEMPT_KEY = 'dsh:splash-stuck'
 
 export function SplashOverlay({ onDone }: { onDone: () => void }): JSX.Element | null {
   const { config } = useHarness()
-  const [theme] = useTheme()
+  const { theme } = useTheme()
   const [exiting, setExiting] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const doneRef = useRef(false)

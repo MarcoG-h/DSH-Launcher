@@ -574,8 +574,253 @@ export async function install(home: string, profile: string, spec: string, name?
       const after = depNames(home, profile)
       for (const n of after) if (!before.has(n)) setEnabled(home, profile, n, true)
     }
+  } else {
+    // 失败的安装会残留:pnpm 已把依赖写入 package.json、node_modules 留下残缺目录,
+    // 且失败的 add 可能已把插件挂进插件树(cordis.patch.yml insert)或 bundles 层
+    // (网络失败不像 allowBuilds 那样自动回滚)。若不清理,profile 启动时 include-loader
+    // 会尝试导入残缺包而整个 boot 崩溃。这里把本次 spec 新增的残留全部移除。
+    rollbackFailedAdd(home, profile, before, spec, name)
   }
   return r
+}
+
+/**
+ * 从安装 spec 推断可能的包名候选。github 直装可能落成裸名(repo)或 scoped
+ * (@owner/repo)两种;本地路径取目录名。
+ */
+function depNameCandidates(spec: string): string[] {
+  let s = spec.trim()
+  // 裸 npm 名:@scope/name 或 name。
+  const bare = s.match(/^((?:@[^/]+\/)?[^/@\s]+)$/)
+  if (bare) return [bare[1]]
+  // 去掉 git+/github: 前缀与 #ref、.git 后缀。
+  s = s.replace(/^git\+/, '').replace(/^github:/, '')
+  s = s.replace(/#.*$/, '').replace(/\.git$/, '')
+  // github.com/owner/repo 或 github:owner/repo 或 git+...owner/repo。
+  const m = s.match(/github\.com\/([^/]+)\/([^/?#]+)/) ?? s.match(/^([^/]+)\/([^/?#]+)$/)
+  if (m) return [m[2], `@${m[1]}/${m[2]}`]
+  // 其它 URL(如 codeload/archive)取最后一段。
+  const seg = s.match(/\/([^/?#]+)\/?$/)
+  return seg ? [seg[1]] : []
+}
+
+/**
+ * 清理失败安装的残留:package.json dependencies + 残缺的 node_modules 目录 +
+ * 插件树 insert(cordis.patch.yml) + dsh.profile.bundles 数组。
+ * 只处理「本次新增(不在 before)且包名匹配 spec」的插件,避免误伤并发安装或
+ * 原本就存在、只是重装失败的插件(那会破坏一个原本能用的插件)。
+ */
+function rollbackFailedAdd(home: string, profile: string, before: Set<string>, spec: string, name?: string): void {
+  const candidates = new Set<string>([...(name ? [name] : []), ...depNameCandidates(spec)])
+  const dir = profileDir(home, profile)
+  const file = join(dir, 'package.json')
+  const manifest = readJson(file)
+  if (!manifest) return
+  const deps = (manifest.dependencies as Record<string, string> | undefined) ?? {}
+  const dsh = manifest.dsh as Record<string, unknown> | undefined
+  const profileBlock = dsh?.profile as Record<string, unknown> | undefined
+  const bundles = Array.isArray(profileBlock?.bundles) ? (profileBlock.bundles as string[]) : []
+  let changed = false
+  for (const n of candidates) {
+    if (before.has(n)) continue // 原本就存在:失败的重装不应破坏它
+    if (n in deps) {
+      delete deps[n]
+      changed = true
+      taskLine(`install:${spec}`, t(`清理失败安装的残留依赖「${n}」…`, `Cleaning up residual dependency "${n}" from failed install…`), 'stderr')
+    }
+    // 残缺的 node_modules 目录(含 junction 场景,用 rmSync 兜底)。
+    rmSync(join(dir, 'node_modules', n), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+    // 插件树 insert:不摘除则启动时 include-loader 仍会导入不存在的包而崩溃。
+    if (removePluginInsert(home, profile, n)) changed = true
+    // bundles 层:失败 add 若已登记,一并摘除。
+    if (bundles.includes(n)) {
+      const idx = bundles.indexOf(n)
+      bundles.splice(idx, 1)
+      changed = true
+    }
+  }
+  if (changed) {
+    if (profileBlock) profileBlock.bundles = bundles
+    writeFileSync(file, JSON.stringify(manifest, null, 2), 'utf8')
+  }
+}
+
+/**
+ * 移除一个「损坏」的插件:package.json 依赖 + node_modules 目录 + 插件树 insert
+ * + bundles 数组。用于启动前自愈(healBrokenDeps)与启动失败后的定点清理。
+ * 返回是否真的发生了移除。
+ */
+export function removeBrokenPlugin(home: string, profile: string, name: string): boolean {
+  const dir = profileDir(home, profile)
+  const file = join(dir, 'package.json')
+  const manifest = readJson(file)
+  if (!manifest) return false
+  const deps = (manifest.dependencies as Record<string, string> | undefined) ?? {}
+  const dsh = manifest.dsh as Record<string, unknown> | undefined
+  const profileBlock = dsh?.profile as Record<string, unknown> | undefined
+  const bundles = Array.isArray(profileBlock?.bundles) ? (profileBlock.bundles as string[]) : []
+  let changed = false
+  if (name in deps) {
+    delete deps[name]
+    changed = true
+  }
+  const bi = bundles.indexOf(name)
+  if (bi >= 0) {
+    bundles.splice(bi, 1)
+    changed = true
+  }
+  if (changed) {
+    manifest.dependencies = deps
+    if (profileBlock) profileBlock.bundles = bundles
+    writeFileSync(file, JSON.stringify(manifest, null, 2), 'utf8')
+  }
+  rmSync(join(dir, 'node_modules', name), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+  if (removePluginInsert(home, profile, name)) changed = true
+  return changed
+}
+
+/**
+ * 判断一个已安装的依赖是否「明显损坏」:
+ * - node_modules/<name> 缺失或 package.json 不可读 → 损坏(下载失败的残留);
+ * - 声明了 main 但文件缺失 → 损坏;
+ * - 无 main 且无 dsh 字段 / exports / cordis.patch.yml / index.js 任何入口 → 损坏
+ *   (如 git 源码残留没构建出入口)。modlens 这类用 dsh 字段挂载的插件不算损坏。
+ */
+function isBrokenInstalled(home: string, profile: string, name: string): boolean {
+  const pkgDir = join(profileDir(home, profile), 'node_modules', name)
+  let pkg: Record<string, unknown> | null
+  try {
+    pkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as Record<string, unknown>
+  } catch {
+    return true
+  }
+  const main = typeof pkg.main === 'string' && pkg.main.length > 0 ? pkg.main : null
+  if (main) return !existsSync(join(pkgDir, main)) // 声明了 main 但文件缺失
+  if (pkg.exports != null || pkg.dsh != null) return false
+  return !existsSync(join(pkgDir, 'cordis.patch.yml')) && !existsSync(join(pkgDir, 'index.js'))
+}
+
+/**
+ * 启动前自愈:扫描 profile 依赖,移除「明显损坏」的插件(残留/未装完/无入口)。
+ * 返回被移除的插件名列表。幂等、毫秒级;只动损坏项,不动正常插件。
+ */
+export function healBrokenDeps(home: string, profile: string): string[] {
+  const manifest = readJson(join(profileDir(home, profile), 'package.json'))
+  const deps = (manifest?.dependencies as Record<string, string> | undefined) ?? {}
+  const removed: string[] = []
+  for (const name of Object.keys(deps)) {
+    if (!isBrokenInstalled(home, profile, name)) continue
+    if (removeBrokenPlugin(home, profile, name)) removed.push(name)
+  }
+  return removed
+}
+
+/**
+ * 修复一个 profile 插件树里的「悬空 insert」:cordis.patch.yml 里 insert 了某个
+ * 插件,但该包既不在 dependencies 也没有安装到 node_modules(如从本地库删除插件
+ * 时卸载失败留下的)。留着会让启动时 include-loader 导入不存在的包而整个 profile
+ * 崩溃。返回被移除的悬空插件名。
+ */
+export function repairProfilePluginRefs(home: string, profile: string): string[] {
+  const removed: string[] = []
+  const dir = profileDir(home, profile)
+  if (!existsSync(join(dir, 'cordis.patch.yml'))) return removed
+  const deps = (readJson(join(dir, 'package.json'))?.dependencies as Record<string, string> | undefined) ?? {}
+  let patches: unknown[]
+  try {
+    patches = readProfilePatches(home, profile)
+  } catch {
+    return removed
+  }
+  if (!Array.isArray(patches)) return removed
+  const next: unknown[] = []
+  let changed = false
+  for (const patch of patches) {
+    if (typeof patch !== 'object' || patch === null) { next.push(patch); continue }
+    const record = patch as Record<string, unknown>
+    const insert = record.insert
+    if (!Array.isArray(insert)) { next.push(patch); continue }
+    const kept = insert.filter((entry) => {
+      if (typeof entry !== 'object' || entry === null) return true
+      const e = entry as Record<string, unknown>
+      const name = typeof e.name === 'string' ? e.name : (typeof e.id === 'string' ? e.id : null)
+      if (!name) return true
+      const ok = name in deps && existsSync(join(dir, 'node_modules', name, 'package.json'))
+      if (!ok) removed.push(name)
+      return ok
+    })
+    if (kept.length !== insert.length) changed = true
+    if (kept.length > 0) next.push({ ...record, insert: kept })
+  }
+  if (changed) writeProfilePatches(home, profile, next)
+  return removed
+}
+
+/**
+ * 启动时全 profile 健康修复:扫描所有实例的 home,移除各 profile 插件树里的悬空
+ * insert(包已不在 deps / node_modules 的)。防止「删了插件但树里还挂着」的引用
+ * 在下次启动时让 profile 崩掉。返回修复摘要列表。
+ */
+export function repairAllProfiles(): string[] {
+  const fixed: string[] = []
+  const homes = new Set<string>()
+  for (const inst of getConfig().instances) {
+    try {
+      homes.add(instanceDshHome(inst))
+    } catch { /* 实例数据异常则跳过该 home */ }
+  }
+  for (const home of homes) {
+    const profilesDir = join(home, 'profiles')
+    if (!existsSync(profilesDir)) continue
+    for (const p of readdirSync(profilesDir)) {
+      if (!existsSync(join(profilesDir, p, 'package.json'))) continue
+      for (const n of repairProfilePluginRefs(home, p)) fixed.push(`${p}: ${n}`)
+    }
+  }
+  return fixed
+}
+
+/**
+ * 判断插件是否被 profile「引用」:在 dependencies、bundles 或插件树 insert
+ * (cordis.patch.yml)任一里就算。用于自愈判断——包可能已从 deps 移除但树里还
+ * 挂着 insert(如从本地库删除插件时卸载失败),启动仍会加载它而崩溃。
+ */
+function profileReferencesPlugin(home: string, profile: string, name: string): boolean {
+  const manifest = readJson(join(profileDir(home, profile), 'package.json'))
+  const deps = (manifest?.dependencies as Record<string, string> | undefined) ?? {}
+  if (name in deps) return true
+  const dsh = manifest?.dsh as Record<string, unknown> | undefined
+  const profileBlock = dsh?.profile as Record<string, unknown> | undefined
+  const bundles = Array.isArray(profileBlock?.bundles) ? (profileBlock.bundles as string[]) : []
+  if (bundles.includes(name)) return true
+  const { names, ids } = patchInsertedPlugins(home, profile)
+  return names.has(name) || ids.has(pluginInsertId(name))
+}
+
+/**
+ * 从 dsh 启动错误里提取「缺失的 profile 插件名」。只认本 profile node_modules
+ * 下的包(带路径形式),或裸名但确实被本 profile 引用(deps / bundles / 插件树)
+ * 的包——避免把 harness 仓库/其它目录的缺失误判为 profile 插件。
+ */
+export function missingProfilePlugin(home: string, profile: string, stderr: string): string | null {
+  const profileNM = join(home, 'profiles', profile, 'node_modules')
+  const profileNMFwd = profileNM.replace(/\\/g, '/')
+  const re = /Cannot find package '([^']+)'/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(stderr)) !== null) {
+    const target = m[1]
+    // 带路径形式:...profiles\<profile>\node_modules\<pkg>\...
+    if (target.includes(profileNM) || target.includes(profileNMFwd)) {
+      const seg = target.slice(target.lastIndexOf('node_modules') + 'node_modules'.length + 1).split(/[\\/]/)
+      return seg[0]?.startsWith('@') && seg[1] ? `${seg[0]}/${seg[1]}` : (seg[0] ?? null)
+    }
+    // 裸名形式(Cannot find package 'dsh-deep-whale' / '@scope/pkg'):确认真被本
+    // profile 引用再返回。scoped 包名(@scope/pkg)含 `/`,不能按「含斜杠=路径」排除。
+    const isPlain = !target.includes('\\') && !target.includes('/')
+    const isScoped = /^@[^/]+\/[^/]+$/.test(target)
+    if ((isPlain || isScoped) && profileReferencesPlugin(home, profile, target)) return target
+  }
+  return null
 }
 
 export async function remove(home: string, profile: string, name: string): Promise<CmdResult> {
@@ -821,6 +1066,17 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+/** 本地库是否还有 `.deleting-` 残留。 */
+function hasDeletingResidue(): boolean {
+  const pluginDir = getConfig().pluginDir
+  if (!pluginDir || !existsSync(pluginDir)) return false
+  try {
+    return readdirSync(pluginDir).some((n) => n.startsWith('.deleting-'))
+  } catch {
+    return false
+  }
+}
+
 /** 清理本地库下删除改名兜底遗留的 `.deleting-*` 残留(未被占用的直接删,防累积)。 */
 function cleanupDeletingResidue(): void {
   const pluginDir = getConfig().pluginDir
@@ -828,10 +1084,23 @@ function cleanupDeletingResidue(): void {
   for (const entry of readdirSync(pluginDir, { withFileTypes: true })) {
     if (!entry.isDirectory() || !entry.name.startsWith('.deleting-')) continue
     try {
-      rmSync(join(pluginDir, entry.name), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+      rmSync(join(pluginDir, entry.name), { recursive: true, force: true, maxRetries: 5, retryDelay: 400 })
     } catch {
       /* 仍被占用,留待下次清理 */
     }
+  }
+}
+
+/**
+ * 删除改名兜底留下的 `.deleting-` 残留,稍后异步多轮重试。
+ * 删除时实例刚被停止,残留句柄可能在 1-2s 后才释放;扫描清理只跑一次,若当时还没
+ * 释放就永远清不掉。这里在删除后补上延时多轮清理,句柄一释放就自动清掉残留。
+ */
+async function cleanupDeletingResidueSoon(): Promise<void> {
+  for (let i = 0; i < 6; i++) {
+    await delay(1500)
+    cleanupDeletingResidue()
+    if (!hasDeletingResidue()) return
   }
 }
 
@@ -855,7 +1124,14 @@ export async function removeFromLibrary(name: string): Promise<CmdResult> {
     if (!installed.some((p) => p.name === name)) continue
     setEnabled(home, inst.profile, name, false)
     const r = await remove(home, inst.profile, name)
-    if (r.ok) affected.push(inst.id)
+    if (r.ok) {
+      affected.push(inst.id)
+    } else {
+      // `dsh plugin remove` 失败(实例未停 / 依赖损坏 / 网络):至少把该 profile 里
+      // 对它的引用(deps + bundles + 插件树 insert)清掉,避免本地库删了之后启动
+      // 时 include-loader 还去加载一个已不存在的插件而整个 profile 崩掉。
+      removeBrokenPlugin(home, inst.profile, name)
+    }
   }
 
   if (dirExists) {
@@ -868,6 +1144,9 @@ export async function removeFromLibrary(name: string): Promise<CmdResult> {
     } catch (e) {
       return { ok: false, code: 1, error: e instanceof Error ? e.message : String(e), affected }
     }
+    // 句柄可能尚未完全释放,删除可能留下 `.deleting-` 残留:安排后台多轮延时清理,
+    // 句柄一释放就自动清掉,不再让残留一直占着本地库。
+    void cleanupDeletingResidueSoon()
   }
   // 插件已从本地库移除(或本就已移除),连同它的显示名/备注一并清掉,
   // 避免「插件删了、名字还留在上面」的残留(此前推荐整合包功能遗留过这个问题)。
@@ -1133,7 +1412,7 @@ export async function installBundle(
       n += 1
       const phase = t(`安装社区插件 ${n}/${community.length}:${p.name ?? spec}…`, `Installing community plugin ${n}/${community.length}: ${p.name ?? spec}…`)
       report(phase)
-      const r = await install(home, profile, spec, undefined, p.flags)
+      const r = await install(home, profile, spec, p.name, p.flags)
       if (r.ok) {
         taskLine(label, `✔ ${p.name ?? spec}`)
       } else {

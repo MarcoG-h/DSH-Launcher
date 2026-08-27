@@ -11,7 +11,9 @@
   --text: #e8ebf1;
   --muted: #8b93a1;
   --accent: #1783ff;
-  --accent-soft: rgba(23, 131, 255, 0.14);
+  /* soft/border 用 color-mix 跟随 --accent,换主色时整站随之变化 */
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent) 45%, transparent);
   --ok: #22c55e;
   --warn: #f59e0b;
   --err: #ef4444;
@@ -29,7 +31,246 @@
   --text: #1b1f24;
   --muted: #6b7380;
   --accent: #1668dc;
-  --accent-soft: rgba(22, 104, 220, 0.1);
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+  --accent-border: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+/* ── 毛玻璃(glass)风格:面板半透明 + 背景模糊 ────────────────────────────
+ * 仅改颜色变量与 backdrop-filter,组件结构与布局完全不动。扁平化 = 默认(不
+ * 加 data-style 或 data-style="flat")。 */
+:root[data-style="glass"] {
+  --bg: #08090c;
+  --bg-soft: rgba(14, 17, 22, 0.6);
+  --panel: rgba(20, 24, 31, 0.5);
+  --card: rgba(26, 31, 40, 0.5);
+  --card-hover: rgba(34, 40, 51, 0.66);
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+}
+
+:root[data-theme="light"][data-style="glass"] {
+  --bg: #eef1f6;
+  --bg-soft: rgba(236, 239, 244, 0.55);
+  --panel: rgba(255, 255, 255, 0.55);
+  --card: rgba(255, 255, 255, 0.6);
+  --card-hover: rgba(255, 255, 255, 0.78);
+  --border: rgba(20, 30, 45, 0.1);
+  --border-strong: rgba(20, 30, 45, 0.16);
+}
+
+/* ── 毛玻璃:光晕做成底层蒙版,每个玻璃面板是「看见蒙版的窗口」 ─────────
+ * 光晕只画在 body 背景(固定层);面板半透明 + 背景模糊,因位置不同看到
+ * 蒙版不同的切片 → 每个面板看起来不一样但整体协调。光晕克制(暗色 7-12%、
+ * 浅色略高让白玻璃透出),只作点缀。 */
+
+/* 光晕/背景图直接画在 body 背景上(不加 background-attachment:fixed —— 那种
+ * 固定背景层在 Chromium 里不会被 backdrop-filter 采样,毛玻璃就虚化不了背后)。
+ * body 自身不滚动(height:100%,滚动在内部 main),所以背景天然固定像壁纸。
+ * 光晕做成底层蒙版:每个玻璃面板是「看见蒙版的窗口」,随位置看到不同切片。 */
+
+/* 毛玻璃:主色光晕叠在背景上(随主色调变化的 4 个光斑)。
+ * 背景图由 JS 直接设到 body 的 background-image(CSSOM 注入,不走 var()),
+ * 有图时内联样式覆盖本规则;无图时本规则生效。 */
+:root[data-style="glass"] body {
+  background-image:
+    radial-gradient(850px 520px at 8% 4%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 60%),
+    radial-gradient(950px 600px at 92% 14%, color-mix(in srgb, color-mix(in srgb, var(--accent) 78%, #ffffff) 22%, transparent), transparent 58%),
+    radial-gradient(1000px 640px at 55% 112%, color-mix(in srgb, color-mix(in srgb, var(--accent) 82%, #000000) 20%, transparent), transparent 62%),
+    radial-gradient(700px 460px at 70% 40%, color-mix(in srgb, color-mix(in srgb, var(--accent) 72%, #ffffff) 14%, transparent), transparent 60%);
+  background-size: auto, auto, auto, auto;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+:root[data-theme="light"][data-style="glass"] body {
+  background-image:
+    radial-gradient(850px 520px at 8% 4%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 60%),
+    radial-gradient(950px 600px at 92% 14%, color-mix(in srgb, color-mix(in srgb, var(--accent) 78%, #ffffff) 26%, transparent), transparent 58%),
+    radial-gradient(1000px 640px at 55% 112%, color-mix(in srgb, color-mix(in srgb, var(--accent) 82%, #000000) 24%, transparent), transparent 62%),
+    radial-gradient(700px 460px at 70% 40%, color-mix(in srgb, color-mix(in srgb, var(--accent) 72%, #ffffff) 18%, transparent), transparent 60%);
+}
+
+/* 设置了背景图时,左侧栏也半透显示图片(扁平模式同样生效) */
+:root[data-bg-image="set"] .app-sidebar {
+  background: rgba(19, 24, 32, 0.72);
+  backdrop-filter: blur(22px) saturate(1.45);
+  -webkit-backdrop-filter: blur(22px) saturate(1.45);
+}
+:root[data-theme="light"][data-bg-image="set"] .app-sidebar {
+  background: rgba(255, 255, 255, 0.7);
+}
+
+/* 收起(窄条)时圆角收小,避免与图标打架 */
+:root[data-style="glass"] .app-sidebar[data-collapsed="true"] {
+  border-radius: 0 12px 12px 0;
+}
+
+/* 背景图模式:主界面面板稍微提高不透明度,保证文字可读(玻璃卡片外仍显示图片) */
+:root[data-style="glass"][data-bg-image="set"] .panel,
+:root[data-style="glass"][data-bg-image="set"] .card {
+  background:
+    linear-gradient(rgba(24, 30, 40, 0.9), rgba(18, 23, 32, 0.86)) padding-box,
+    linear-gradient(155deg,
+      rgba(255, 255, 255, 0.14) 0%,
+      rgba(255, 255, 255, 0.04) 30%,
+      rgba(255, 255, 255, 0.01) 58%,
+      color-mix(in srgb, var(--accent) 30%, transparent) 140%) border-box;
+}
+:root[data-theme="light"][data-style="glass"][data-bg-image="set"] .panel,
+:root[data-theme="light"][data-style="glass"][data-bg-image="set"] .card {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.86), rgba(255, 255, 255, 0.8)) padding-box,
+    linear-gradient(155deg,
+      rgba(255, 255, 255, 0.92) 0%,
+      rgba(255, 255, 255, 0.55) 30%,
+      rgba(255, 255, 255, 0.18) 58%,
+      color-mix(in srgb, var(--accent) 48%, transparent) 138%) border-box;
+}
+
+/* 卡片/面板:半透明磨砂「窗」,透过它看到底层蒙版 */
+:root[data-style="glass"] .panel,
+:root[data-style="glass"] .card {
+  position: relative;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(rgba(31, 39, 51, 0.76), rgba(23, 29, 40, 0.68)) padding-box,
+    linear-gradient(155deg,
+      rgba(255, 255, 255, 0.14) 0%,
+      rgba(255, 255, 255, 0.04) 30%,
+      rgba(255, 255, 255, 0.01) 58%,
+      color-mix(in srgb, var(--accent) 30%, transparent) 140%) border-box;
+  box-shadow:
+    0 10px 36px rgba(0, 0, 0, 0.3),
+    0 0 0 1px rgba(255, 255, 255, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(48px) saturate(1.45);
+  -webkit-backdrop-filter: blur(48px) saturate(1.45);
+}
+
+:root[data-style="glass"] .card:hover {
+  border-color: transparent;
+  background:
+    linear-gradient(rgba(37, 46, 60, 0.82), rgba(28, 35, 47, 0.74)) padding-box,
+    linear-gradient(155deg,
+      rgba(255, 255, 255, 0.28) 0%,
+      rgba(255, 255, 255, 0.09) 30%,
+      rgba(255, 255, 255, 0.02) 58%,
+      color-mix(in srgb, var(--accent) 38%, transparent) 138%) border-box;
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16),
+    0 0 22px color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+/* 白天:降低白色不透明度让蒙版透出来 + 可见磨砂描边,避免像扁平化 */
+:root[data-theme="light"][data-style="glass"] .panel,
+:root[data-theme="light"][data-style="glass"] .card {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.6), rgba(255, 255, 255, 0.46)) padding-box,
+    linear-gradient(155deg,
+      rgba(255, 255, 255, 0.92) 0%,
+      rgba(255, 255, 255, 0.55) 30%,
+      rgba(255, 255, 255, 0.18) 58%,
+      color-mix(in srgb, var(--accent) 48%, transparent) 138%) border-box;
+  box-shadow:
+    0 10px 32px rgba(28, 44, 70, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(28, 44, 70, 0.07);
+  backdrop-filter: blur(40px) saturate(1.4);
+  -webkit-backdrop-filter: blur(40px) saturate(1.4);
+}
+
+/* 弹层背后虚化:盖在内容上的遮罩在玻璃模式下把背后内容模糊掉 */
+:root[data-style="glass"] .modal-backdrop {
+  background: rgba(4, 6, 10, 0.34) !important;
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+}
+:root[data-theme="light"][data-style="glass"] .modal-backdrop {
+  background: rgba(30, 44, 64, 0.18) !important;
+}
+
+/* 左侧栏:同款磨砂窗,不自带光晕(光晕由底层蒙版提供,随位置不同而不同) */
+:root[data-style="glass"] .app-sidebar {
+  position: relative;
+  border-right: 1px solid transparent;
+  border-radius: 0 44px 44px 0;
+  background:
+    linear-gradient(rgba(30, 38, 50, 0.74), rgba(21, 27, 37, 0.66)) padding-box,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.04) 22%, rgba(255, 255, 255, 0.01) 75%, color-mix(in srgb, var(--accent) 26%, transparent)) border-box;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset -1px 0 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(44px) saturate(1.5);
+  -webkit-backdrop-filter: blur(44px) saturate(1.5);
+}
+:root[data-theme="light"][data-style="glass"] .app-sidebar {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.5)) padding-box,
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.4) 25%, rgba(255, 255, 255, 0.15) 80%, color-mix(in srgb, var(--accent) 42%, transparent)) border-box;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset -1px 0 0 rgba(28, 44, 70, 0.05);
+}
+
+/* 液态玻璃侧面的弧边:右缘一道竖向凸起的高光,暗示侧面玻璃是弧的(立体感) */
+:root[data-style="glass"] .app-sidebar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  /* 继承圆角:inset 阴影被裁剪到圆角形状,高光自然跟着拐角转弯 */
+  border-radius: inherit;
+  pointer-events: none;
+  /* 右缘高光:内侧淡、外侧强;细线 + 柔光,随圆角转过拐角 */
+  box-shadow:
+    inset -14px 0 18px -14px rgba(255, 255, 255, 0.08),
+    inset -1.5px 0 0 rgba(255, 255, 255, 0.07);
+}
+
+
+/* 导航项:选中的条目做磨砂小卡片,主色描边点缀;扁平模式保持 accent-soft */
+.nav-item {
+  background: transparent;
+  border: 1px solid transparent;
+}
+.nav-item[data-active="true"] {
+  background: var(--accent-soft);
+}
+:root[data-style="glass"] .nav-item[data-active="true"] {
+  border-color: transparent;
+  background:
+    linear-gradient(rgba(38, 46, 61, 0.8), rgba(30, 37, 49, 0.74)) padding-box,
+    linear-gradient(150deg,
+      color-mix(in srgb, var(--accent) 60%, transparent) 0%,
+      rgba(255, 255, 255, 0.1) 45%,
+      color-mix(in srgb, var(--accent) 18%, transparent) 130%) border-box;
+  box-shadow:
+    0 0 14px color-mix(in srgb, var(--accent) 12%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 3px 12px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(16px) saturate(1.5);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+}
+:root[data-theme="light"][data-style="glass"] .nav-item[data-active="true"] {
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.6)) padding-box,
+    linear-gradient(150deg,
+      color-mix(in srgb, var(--accent) 55%, transparent) 0%,
+      rgba(255, 255, 255, 0.45) 45%,
+      color-mix(in srgb, var(--accent) 18%, transparent) 130%) border-box;
+  box-shadow:
+    0 0 12px color-mix(in srgb, var(--accent) 10%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 2px 10px rgba(28, 44, 70, 0.12);
+}
+
+/* 其余面板型元素统一玻璃背景(矩阵菜单、详情弹层等) */
+:root[data-style="glass"] .topbar,
+:root[data-style="glass"] .modal,
+:root[data-style="glass"] .matrix-cell-menu,
+:root[data-style="glass"] .detail-modal {
+  backdrop-filter: blur(26px) saturate(1.45);
+  -webkit-backdrop-filter: blur(26px) saturate(1.45);
 }
 
 html,
@@ -45,6 +286,14 @@ body {
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   user-select: none;
+}
+
+.app-sidebar {
+  background: var(--panel);
+}
+
+.topbar {
+  background: var(--panel);
 }
 
 .panel {
