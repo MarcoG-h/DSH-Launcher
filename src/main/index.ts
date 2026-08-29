@@ -24,7 +24,15 @@ const here = dirname(fileURLToPath(import.meta.url))
  * the exe icon (also the whale), so this never breaks anything.
  */
 function appIconPath(): string | undefined {
-  for (const p of [join(process.resourcesPath, 'icon.png'), join(app.getAppPath(), 'resources', 'icon.png')]) {
+  // Windows 任务栏图标用 .ico 才可靠(PNG 经常显示成默认/空白图标)。
+  // 开发模式优先 build/icon.ico(打包时 electron-builder 用它生成 exe 图标);
+  // 打包后回退 resources/icon.ico / icon.png。
+  for (const p of [
+    join(process.resourcesPath, 'icon.ico'),
+    join(app.getAppPath(), 'build', 'icon.ico'),
+    join(process.resourcesPath, 'icon.png'),
+    join(app.getAppPath(), 'resources', 'icon.png')
+  ]) {
     if (existsSync(p)) return p
   }
   return undefined

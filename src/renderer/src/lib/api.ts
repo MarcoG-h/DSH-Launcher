@@ -21,6 +21,9 @@ import type {
   PluginMatrixRow,
   PluginMeta,
   PluginSubPackage,
+  ProbeStatus,
+  SecurityAuditEvent,
+  SecurityConfig,
   TaskEvent
 } from '../../../shared/types'
 
@@ -47,6 +50,9 @@ export type {
   PluginMatrixRow,
   PluginMeta,
   PluginSubPackage,
+  ProbeStatus,
+  SecurityAuditEvent,
+  SecurityConfig,
   TaskEvent
 }
 

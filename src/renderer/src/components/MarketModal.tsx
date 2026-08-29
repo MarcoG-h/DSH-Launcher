@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX, MouseEvent } from 'react'
 import { api, type CmdResult, type MarketReadme, type MarketRepo, type PluginSubPackage } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
+import { useBackdropClose } from '../hooks/useBackdropClose'
 import { useI18n } from '../i18n'
 import { renderMarkdown } from '../lib/markdown'
 import { TaskConsole } from './TaskConsole'
@@ -98,14 +99,17 @@ export function MarketModal({ repo, isInstalled, onClose, onInstalled }: Props):
     void api.confirmOpenExternal(href)
   }
 
+  const backdrop = useBackdropClose(onClose)
   return (
     <div
       className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-6"
       style={{ background: 'rgba(0,0,0,0.45)' }}
-      onClick={onClose}
+      onMouseDown={backdrop.onMouseDown}
+      onClick={backdrop.onClick}
     >
       <div
         className="panel flex max-h-[80vh] w-full max-w-[680px] flex-col p-0"
+        onMouseDown={backdrop.contentMouseDown}
         onClick={(e) => e.stopPropagation()}
       >
         {/* header */}

@@ -24,6 +24,15 @@ export function ListIcon(): JSX.Element {
   )
 }
 
+export function ShieldIcon(): JSX.Element {
+  return (
+    <svg className={base} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3 5 6v5c0 4.4 3 8.2 7 9.5 4-1.3 7-5.1 7-9.5V6l-7-3Z" />
+      <path d="M9.5 12l1.8 1.8 3.2-3.6" />
+    </svg>
+  )
+}
+
 export function PuzzleIcon(): JSX.Element {
   return (
     <svg className={base} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

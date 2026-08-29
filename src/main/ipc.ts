@@ -12,6 +12,7 @@ import * as market from './market'
 import * as plugins from './plugins'
 import * as popup from './popup'
 import * as runtime from './runtime'
+import * as security from './security'
 import { registerEmbeddedView } from './webview'
 import type { DshInstance, MarketSourceId, NewInstanceInput, PluginMeta } from '../shared/types'
 
@@ -48,6 +49,9 @@ export function registerIpc(): void {
     const r = win && !win.isDestroyed()
       ? await dialog.showMessageBox(win, opts)
       : await dialog.showMessageBox(opts)
+    // 恢复窗口焦点:原生对话框关闭后会夺走窗口焦点,导致之后所有输入框/下拉无法互动
+    // (只能靠切换窗口恢复)。关闭后把焦点还给主窗口。
+    if (win && !win.isDestroyed()) win.focus()
     return r.response === 1
   })
 
@@ -227,6 +231,20 @@ export function registerIpc(): void {
 
   ipcMain.handle('balance:get', () => balance.getBalance())
 
+  // Security: read the dsh-audit probe's audit events + manage security settings.
+  ipcMain.handle('security:list', () => security.listAuditEvents())
+  ipcMain.handle('security:clearAudit', () => security.clearAudit())
+  ipcMain.handle('security:exportAudit', () => security.exportAudit())
+  ipcMain.handle('security:getWhitelist', () => security.getWhitelist())
+  ipcMain.handle('security:openWhitelistFile', () => security.openWhitelistFile())
+  ipcMain.handle('security:getConfig', () => security.getSecurityConfig())
+  ipcMain.handle('security:setConfig', (_e, patch: unknown) => security.setSecurityConfig((patch ?? {}) as Partial<security.SecurityConfig>))
+  // 探针管理:每个实例检测/安装/开关。
+  ipcMain.handle('security:listProbeStatus', () => security.listProbeStatus())
+  ipcMain.handle('security:installProbe', (_e, instanceId: string) => security.installProbe(String(instanceId)))
+  ipcMain.handle('security:removeProbe', (_e, instanceId: string) => security.removeProbe(String(instanceId)))
+  ipcMain.handle('security:reinstallProbe', (_e, instanceId: string) => security.reinstallProbe(String(instanceId)))
+
   // Plugin market (GitHub search, unauthenticated).
   ipcMain.handle('market:search', (_e, sourceId: string, page: number, query?: string, categoryId?: string, force?: boolean) =>
     market.searchMarket((sourceId as MarketSourceId) || 'github', page, query, categoryId, Boolean(force)))
@@ -237,15 +255,27 @@ export function registerIpc(): void {
   ipcMain.handle('shell:openExternal', async (_e, url: string) => {
     const u = String(url ?? '')
     if (!/^(https?:|mailto:)/i.test(u)) return false
-    const { response } = await dialog.showMessageBox({
-      type: 'question',
-      buttons: [t('打开', 'Open'), t('取消', 'Cancel')],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true,
-      message: t('用浏览器打开外部链接?', 'Open external link in browser?'),
-      detail: u
-    })
+    const win = BrowserWindow.getFocusedWindow()
+    const { response } = await (win && !win.isDestroyed()
+      ? dialog.showMessageBox(win, {
+        type: 'question',
+        buttons: [t('打开', 'Open'), t('取消', 'Cancel')],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        message: t('用浏览器打开外部链接?', 'Open external link in browser?'),
+        detail: u
+      })
+      : dialog.showMessageBox({
+        type: 'question',
+        buttons: [t('打开', 'Open'), t('取消', 'Cancel')],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        message: t('用浏览器打开外部链接?', 'Open external link in browser?'),
+        detail: u
+      }))
+    if (win && !win.isDestroyed()) win.focus()
     if (response !== 0) return false
     await shell.openExternal(u)
     return true

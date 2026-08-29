@@ -241,14 +241,14 @@ function launchPlan(cfg: LauncherConfig, inst: DshInstance): LaunchPlan {
       cmd: node,
       args: inner,
       cwd: ensureWorkspace(inst),
-      envPatch: { ...bundledEnv(), DSH_HOME: home }
+      envPatch: { ...bundledEnv(), DSH_HOME: home, DSH_AUDIT_PROFILE: inst.profile || 'web' }
     }
   }
   return {
     cmd: cfg.nodePath,
     args: resolveScriptArgs(inner, cfg.harnessRepo),
     cwd: ensureWorkspace(inst),
-    envPatch: { DSH_HOME: home }
+    envPatch: { DSH_HOME: home, DSH_AUDIT_PROFILE: inst.profile || 'web' }
   }
 }
 

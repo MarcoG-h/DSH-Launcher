@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { JSX } from 'react'
 import { api, type PluginListResult, type PluginMatrixResult, type PluginMatrixRow, type PluginMeta } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
+import { useBackdropClose } from '../hooks/useBackdropClose'
 import { useI18n } from '../i18n'
 import { TrashIcon, PlayIcon, DownloadIcon, RefreshIcon } from '../lib/icons'
 import { TaskConsole } from '../components/TaskConsole'
@@ -23,7 +24,13 @@ export function Plugins(): JSX.Element {
   const [spec, setSpec] = useState('')
   const [busy, setBusy] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<'local' | 'market'>('market')
+  const [tab, setTabState] = useState<'local' | 'market'>(() => {
+    try { return localStorage.getItem('dsh-launcher-plugins-tab') === 'local' ? 'local' : 'market' } catch { return 'market' }
+  })
+  const setTab = (k: 'local' | 'market'): void => {
+    setTabState(k)
+    try { localStorage.setItem('dsh-launcher-plugins-tab', k) } catch { /* 忽略 */ }
+  }
   const [menu, setMenu] = useState<CellMenu | null>(null)
   const [detail, setDetail] = useState<PluginMatrixRow | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -681,17 +688,12 @@ function PluginDetailModal({
   }
 
   // 点击背景才关闭。内层按下、在背景松开(拖选文本后鼠标滑出窗口)时,click 会落在
-  // 背景上——此时若正选中文本(显示名称/备注等),不关闭,避免误触。
-  const overlayClick = (e: React.MouseEvent): void => {
-    if (e.target !== e.currentTarget) return
-    const sel = window.getSelection()
-    if (sel && sel.toString().length > 0) return
-    onClose()
-  }
+  // 背景上——用 mousedown 起始位置判定:只有按下也起始于背景才关闭,避免拖选误触。
+  const backdrop = useBackdropClose(onClose)
 
   return (
-    <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={overlayClick}>
-      <div className="card p-5 w-full max-w-[520px] max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-6" style={{ background: 'rgba(0,0,0,0.5)' }} onMouseDown={backdrop.onMouseDown} onClick={backdrop.onClick}>
+      <div className="card p-5 w-full max-w-[520px] max-h-[85vh] overflow-y-auto" onMouseDown={backdrop.contentMouseDown} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3 mb-3">
           <div className="min-w-0">
             <h3 className="text-[16px] font-semibold leading-tight">{t('plugins.detail.title')}</h3>

@@ -28,22 +28,26 @@ export function LogConsole({ height = '520px' }: { height?: string }): React.JSX
   // One unified console for every instance, instead of one per instance: merge
   // all buffers in time order and tag each line with its instance's name.
   const { logs, instances } = useHarness()
+  // 清空时间戳:清空后隐藏其之前的行,立即生效(不依赖 logs-cleared 广播)。
+  const [clearedAt, setClearedAt] = useState(0)
   const lines = useMemo<MergedLine[]>(() => {
     const out: MergedLine[] = []
     instances.forEach((inst, i) => {
       const tagColor = INSTANCE_COLORS[i % INSTANCE_COLORS.length]
       for (const l of logs[inst.id] ?? []) {
+        // 清空立即生效:隐藏 clearedAt 之前的所有行,不依赖 logs-cleared 广播
+        // (报错时广播可能和新的日志行竞态,导致"清不掉")。
+        if (clearedAt > 0 && l.at <= clearedAt) continue
         out.push({ ...l, instanceId: inst.id, instanceName: inst.name, tagColor })
       }
     })
     out.sort((a, b) => a.at - b.at)
     return out
-  }, [logs, instances])
+  }, [logs, instances, clearedAt])
 
   const ref = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
   const [stick, setStick] = useState(true)
-  const [clearedAt, setClearedAt] = useState(0)
 
   useEffect(() => {
     if (stickRef.current && ref.current) ref.current.scrollTop = ref.current.scrollHeight

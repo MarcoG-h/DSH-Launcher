@@ -103,6 +103,8 @@ export interface LauncherConfig {
   activeInstanceId: string
   /** Per-plugin user metadata (display-name override + remark), keyed by package name. */
   pluginMeta?: Record<string, PluginMeta>
+  /** 安全设置:dsh-audit 探针开关 / 是否记录原文 / 第三方工具白名单。 */
+  security?: { probeEnabled?: boolean; logRawContent?: boolean; thirdPartyTools?: string[] }
   /** 上次窗口位置/大小(用于恢复);displayCount 记录当时的显示器数量,变化则不用恢复。 */
   windowBounds?: { x: number; y: number; width: number; height: number; displayCount: number }
 }
@@ -239,6 +241,46 @@ export interface BalanceResult {
   ok: boolean
   data?: BalanceData
   error?: string
+}
+
+/** 一条被 dsh-audit 探针记录的会话数据流审计事件。 */
+export interface SecurityAuditEvent {
+  t: number
+  sid: string
+  seq: number
+  type: string
+  core: number
+  h: string
+  /** 操作者:发出该事件的插件/角色(如 user、模型名、某第三方工具/插件) */
+  actor?: string
+  /** 原始内容(探针在 logRawContent 开启时记录) */
+  raw?: string
+  /** 风险等级:1=低(密钥键名/部分),2=高(完整密钥明文)。有 flags 时才有 */
+  sev?: number
+  /** 脱敏的密钥预览(如 sk-•••ab12),不含完整明文 */
+  key?: string
+  flags?: string[]
+  home?: string
+  /** 所属实例 id(启动器读取时标注) */
+  instanceId?: string
+  /** 所属实例名(启动器读取时标注,如 web-2) */
+  instanceName?: string
+}
+
+/** 安全设置(探针开关 / 是否记录原文 / 第三方工具白名单)。 */
+export interface SecurityConfig {
+  probeEnabled: boolean
+  logRawContent: boolean
+  /** 第三方工具/插件白名单:只对名单内的工具事件做风险告警 */
+  thirdPartyTools: string[]
+}
+
+/** 每个实例的探针(dsh-audit)状态。 */
+export interface ProbeStatus {
+  instanceId: string
+  name: string
+  installed: boolean
+  enabled: boolean
 }
 
 /** 插件市场来源:GitHub topic 搜索 / deepseek1024.com / dshfind.com。 */
@@ -428,6 +470,28 @@ export interface DshLauncherApi {
   updateRuntime(): Promise<CmdResult>
   /** DeepSeek balance for the configured API key. */
   getBalance(): Promise<BalanceResult>
+  /** Security: list all audited session data-flow events (from the dsh-audit probe). */
+  securityList(): Promise<SecurityAuditEvent[]>
+  /** Security: truly delete all audit history files. */
+  securityClearAudit(): Promise<{ ok: boolean; removed: number }>
+  /** Security: export the full aggregated audit log to a user-chosen file (JSONL). */
+  securityExportAudit(): Promise<{ ok: boolean; code: number | null; error?: string; canceled?: boolean; count?: number }>
+  /** Security: current third-party tool whitelist (read from file). */
+  securityGetWhitelist(): Promise<string[]>
+  /** Security: open the whitelist file with the system editor. */
+  securityOpenWhitelistFile(): Promise<CmdResult>
+  /** Security: current probe/settings. */
+  securityGetConfig(): Promise<SecurityConfig>
+  /** Security: update probe/settings. */
+  securitySetConfig(patch: Partial<SecurityConfig>): Promise<SecurityConfig>
+  /** Security: per-instance probe (dsh-audit) status. */
+  securityListProbeStatus(): Promise<ProbeStatus[]>
+  /** Security: install the probe (npm dsh-audit) into one instance. */
+  securityInstallProbe(instanceId: string): Promise<CmdResult>
+  /** Security: uninstall the probe from one instance. */
+  securityRemoveProbe(instanceId: string): Promise<CmdResult>
+  /** Security: reinstall the probe (latest) on one instance. */
+  securityReinstallProbe(instanceId: string): Promise<CmdResult>
   /** One page of the plugin market: GitHub repos tagged `dsh-plugin`, sorted by stars. An optional keyword and an optional category id (see shared/market-categories.ts) are combined server-side with GitHub search qualifiers. */
   searchMarket(sourceId: MarketSourceId, page: number, query?: string, categoryId?: string, force?: boolean): Promise<MarketPage>
   /** Raw markdown of a repository README for the market detail modal. */

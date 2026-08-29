@@ -148,8 +148,7 @@ export function Settings(): JSX.Element {
         return st === 'running' || st === 'external'
       })
       if (running.length > 0) {
-        const ok = window.confirm(t('settings.updateCloseInstancesConfirm', { count: running.length }))
-        if (!ok) return
+        if (!(await api.confirm(t('settings.updateCloseInstancesConfirm', { count: running.length })))) return
         for (const inst of running) await api.stopInstance(inst.id)
       }
       const r = isBundled ? await api.updateRuntime() : await api.downloadHarness()

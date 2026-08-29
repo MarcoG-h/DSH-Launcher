@@ -1,12 +1,15 @@
 import type { JSX } from 'react'
 import { useHarness } from '../hooks/useHarness'
 import { useTheme } from '../hooks/useTheme'
+import { useSecurityMonitor } from '../hooks/securityMonitor'
 import { useI18n } from '../i18n'
+import { RISK_LEVELS } from '../lib/securityRisk'
 import { api, type DshInstance } from '../lib/api'
 import {
   TerminalIcon,
   ListIcon,
   PuzzleIcon,
+  ShieldIcon,
   GearIcon,
   PanelIcon,
   ChevronIcon,
@@ -21,7 +24,7 @@ import {
 import { StatusPill } from './StatusPill'
 import whaleIcon from '../assets/whale.png'
 
-export type PageId = 'dashboard' | 'instances' | 'plugins' | 'settings'
+export type PageId = 'dashboard' | 'instances' | 'plugins' | 'security' | 'settings'
 
 interface SidebarProps {
   view: PageId | 'dsh'
@@ -48,6 +51,8 @@ const STATUS_PULSE: Record<string, boolean> = {
 
 export function Sidebar({ view, setView, collapsed, setCollapsed, width }: SidebarProps): JSX.Element {
   const { state, config, runningTasks, instances, states, activeInstanceId, poppedOut, setActiveInstance, launcherUpdate } = useHarness()
+  // 安全监控:橙色/红色告警时在侧边栏底部弹窗提醒。
+  const monitor = useSecurityMonitor()
   const { theme, toggleTheme } = useTheme()
   const { lang, t, setLang, statusLabel } = useI18n()
   // Hidden instances stay out of the sidebar — manage them from the Instances page.
@@ -75,6 +80,7 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
     { id: 'dashboard', label: t('nav.dashboard'), icon: <TerminalIcon /> },
     { id: 'instances', label: t('nav.instances'), icon: <ListIcon /> },
     { id: 'plugins', label: t('nav.plugins'), icon: <PuzzleIcon /> },
+    { id: 'security', label: t('nav.security'), icon: <ShieldIcon /> },
     { id: 'settings', label: t('nav.settings'), icon: <GearIcon /> }
   ]
 
@@ -233,7 +239,7 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
                 setView(item.id)
               }}
               title={collapsed ? item.label : undefined}
-              className="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-[9px] text-[13px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-[9px] text-[13px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               data-active={active}
               style={{
                 color: active ? 'var(--accent)' : 'var(--text)',
@@ -243,8 +249,17 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
                 paddingRight: collapsed ? 0 : 12
               }}
             >
-              <span style={{ color: active ? 'var(--accent)' : 'var(--muted)' }}>{item.icon}</span>
-              {!collapsed && <span className="truncate">{item.label}</span>}
+              {/* 展开:超大图标作背景,被圆角边框裁剪露一角 */}
+              {!collapsed && (
+                <span className="nav-bg-icon" style={{ color: active ? 'var(--accent)' : 'var(--muted)' }}>{item.icon}</span>
+              )}
+              {collapsed ? (
+                /* 收起:居中图标 */
+                <span className="nav-icon-center relative" style={{ color: active ? 'var(--accent)' : 'var(--muted)' }}>{item.icon}</span>
+              ) : (
+                /* 展开:标签文字盖在大图标之上 */
+                <span className="truncate">{item.label}</span>
+              )}
             </button>
           )
         })}
@@ -253,6 +268,22 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
       {/* Footer — hidden in the DSH rail */}
       {!dshRail && (
       <div className="px-3 py-3 border-t space-y-2 shrink-0" style={{ borderColor: 'var(--border)' }}>
+        {/* 安全告警弹窗:橙色(高度疑似)/红色(已泄露)时提醒 */}
+        {monitor.level >= 2 && (
+          <div
+            className="rounded-lg px-3 py-2 text-[12px] font-semibold leading-snug select-none cursor-pointer"
+            style={{
+              color: '#fff',
+              background: `linear-gradient(135deg, ${RISK_LEVELS[monitor.level].color}, ${RISK_LEVELS[monitor.level].color}cc)`,
+              boxShadow: `0 0 14px ${RISK_LEVELS[monitor.level].color}99`,
+              animation: 'security-alert-pulse 2s ease-in-out infinite'
+            }}
+            title={t('sidebar.securityAlertHint')}
+            onClick={() => setView('security')}
+          >
+            ⚠ {t(RISK_LEVELS[monitor.level].label)} · {t('sidebar.securityAlert', { n: monitor.count })}
+          </div>
+        )}
         {/* 提示式更新:检测到 DSH-Launcher 新版本时提示,点击打开 GitHub Release 下载页 */}
         {launcherUpdate?.update && launcherUpdate.url && (
           <a

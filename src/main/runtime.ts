@@ -321,7 +321,26 @@ export async function extractZip(zipPath: string, destDir: string, label: string
 export async function installRuntime(): Promise<CmdResult> {
   const cfg = getConfig()
   const label = 'runtime:install'
-  const root = cfg.runtimeRoot
+  // 一键安装时把所有路径设置重置到默认位置。用户手动改坏的路径(改到别处后找不到
+  // 原路径)会在重装时自动纠正回正确位置,避免装到错误目录。包括 pnpm / node / dshHome。
+  const defaultRoot = join(homedir(), '.dsh-runtime')
+  const defaultPluginDir = join(homedir(), 'DSH-Plugin')
+  const defaultDshHome = join(homedir(), '.dsh')
+  const defaultHarnessRepo = existsSync(join(homedir(), 'deepseek-harness'))
+    ? join(homedir(), 'deepseek-harness')
+    : (process.env.DSH_REPO ?? join(homedir(), 'deepseek-harness'))
+  const pathPatch: Record<string, string> = {}
+  if (cfg.runtimeRoot !== defaultRoot) pathPatch.runtimeRoot = defaultRoot
+  if ((cfg.pluginDir || '') !== defaultPluginDir) pathPatch.pluginDir = defaultPluginDir
+  if ((cfg.dshHome || '') !== defaultDshHome) pathPatch.dshHome = defaultDshHome
+  if ((cfg.harnessRepo || '') !== defaultHarnessRepo) pathPatch.harnessRepo = defaultHarnessRepo
+  if ((cfg.pnpm || '') !== 'pnpm') pathPatch.pnpm = 'pnpm'
+  if ((cfg.nodePath || '') !== 'node') pathPatch.nodePath = 'node'
+  if (Object.keys(pathPatch).length > 0) {
+    setConfig({ ...cfg, ...pathPatch })
+    taskLine(label, t(`[runtime] 已重置路径:${Object.keys(pathPatch).map((k) => ` ${k} → ${pathPatch[k]}`).join('')}`, `[runtime] Reset paths:${Object.keys(pathPatch).map((k) => ` ${k} → ${pathPatch[k]}`).join('')}`))
+  }
+  const root = pathPatch.runtimeRoot ?? cfg.runtimeRoot
   // The DSH team's community red line is Node ≥22.19 (below it, node:zlib lacks
   // zstd and AbortSignal.timeout) — bump old persisted versions up to the minimum
   // so the bundled dsh can boot (e.g. existing 22.14 installs self-heal on re-deploy).
@@ -342,7 +361,7 @@ export async function installRuntime(): Promise<CmdResult> {
 
   // Ensure the plugin directory exists too, so a fresh install isn't left with
   // a dangling Settings path (plugins.ts only creates it on first GitHub install).
-  const pluginDir = cfg.pluginDir || join(homedir(), 'DSH-Plugin')
+  const pluginDir = pathPatch.pluginDir ?? (cfg.pluginDir || join(homedir(), 'DSH-Plugin'))
   mkdirSync(pluginDir, { recursive: true })
 
   // 1. portable Node — skip only when the installed version already satisfies

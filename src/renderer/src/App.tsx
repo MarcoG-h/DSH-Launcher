@@ -8,6 +8,7 @@ import { SplashOverlay } from './components/SplashOverlay'
 import { Dashboard } from './pages/Dashboard'
 import { Instances } from './pages/Instances'
 import { Plugins } from './pages/Plugins'
+import { Security } from './pages/Security'
 import { Settings } from './pages/Settings'
 
 const SIDEBAR_EXPANDED = 212
@@ -185,6 +186,8 @@ function Shell(): JSX.Element {
             <Instances />
           ) : page === 'plugins' ? (
             <Plugins />
+          ) : page === 'security' ? (
+            <Security />
           ) : (
             <Settings />
           )}

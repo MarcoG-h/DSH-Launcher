@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import { api, type DshInstance, type PluginMatrixResult } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
+import { useBackdropClose } from '../hooks/useBackdropClose'
 import { useI18n } from '../i18n'
 import { Toggle } from '../components/Toggle'
 import { TaskConsole } from '../components/TaskConsole'
@@ -22,14 +23,17 @@ function statusColor(st: string): string {
 /** Shared modal shell: dark overlay, click outside to close. */
 function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }): JSX.Element {
   const { t } = useI18n()
+  const backdrop = useBackdropClose(onClose)
   return (
     <div
       className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-6"
       style={{ background: 'rgba(0,0,0,0.5)' }}
-      onClick={onClose}
+      onMouseDown={backdrop.onMouseDown}
+      onClick={backdrop.onClick}
     >
       <div
         className={`panel w-full ${wide ? 'max-w-2xl min-h-[640px]' : 'max-w-md'} max-h-[85vh] overflow-y-auto p-5 space-y-4`}
+        onMouseDown={backdrop.contentMouseDown}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-2">
@@ -136,10 +140,11 @@ function EditInstanceModal({ inst, onClose }: { inst: DshInstance; onClose: () =
   }
 
   const remove = async (): Promise<void> => {
-    if (!window.confirm(t('settings.confirmRemoveInstance', { name: inst.name }))) return
+    // 用 main 进程 native dialog(非阻塞、不夺焦点),避免 window.confirm 让后续输入失效。
+    if (!(await api.confirm(t('settings.confirmRemoveInstance', { name: inst.name })))) return
     // 独立 home 实例:会删除整个 DSH_HOME(会话/插件/凭据),二次确认,防止误删。
     if (inst.dshHome) {
-      if (!window.confirm(t('settings.confirmRemoveIsolated', { name: inst.name, home: inst.dshHome }))) return
+      if (!(await api.confirm(t('settings.confirmRemoveIsolated', { name: inst.name, home: inst.dshHome })))) return
     }
     setBusy('remove')
     try {
@@ -174,7 +179,7 @@ function EditInstanceModal({ inst, onClose }: { inst: DshInstance; onClose: () =
   }, [matrix, inst.id])
 
   const disablePlugin = async (name: string, displayName: string): Promise<void> => {
-    if (!window.confirm(t('plugins.disableConfirm', { name: displayName }))) return
+    if (!(await api.confirm(t('plugins.disableConfirm', { name: displayName })))) return
     setPluginBusy(name)
     try {
       await api.disablePlugin(inst.id, name)

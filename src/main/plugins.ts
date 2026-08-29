@@ -1038,6 +1038,25 @@ function removeDirForce(dir: string): void {
 }
 
 /**
+ * 删除前等文件句柄释放:反复尝试删除目录,成功即返回 true;超过重试仍被占用返回
+ * false(由调用方走改名兜底 + 延时清理)。实例刚停时句柄常在 1-2s 后才释放,之前
+ * 只等 400ms 就删、失败直接改名,于是留下 `.deleting-` 残留。这里把等待窗口拉长,
+ * 多数锁释放后能直接删干净,不再产生残留。
+ */
+async function waitUntilDeletable(dir: string, attempts = 15, delayMs = 400): Promise<boolean> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      removeLinksInside(dir)
+      rmSync(dir, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 })
+      return true
+    } catch {
+      if (i < attempts - 1) await delay(delayMs)
+    }
+  }
+  return false
+}
+
+/**
  * Remove a plugin from the local library entirely: uninstall it from every
  * instance's profile (so no `file:` dependency dangles into a deleted folder),
  * then delete its source from pluginDir. Returns the affected instance ids so
@@ -1051,10 +1070,16 @@ function removeDirForce(dir: string): void {
 function killResidualProcesses(dir: string): Promise<void> {
   if (process.platform !== 'win32') return Promise.resolve()
   return new Promise((resolve) => {
+    // 清掉可能持有插件文件句柄的 node/dsh/electron 进程:命令行含该目录、或含该
+    // 目录名(插件派生的子进程/孤儿进程 cwd 常落在插件目录,命令行未必含完整路径)。
+    // 只 kill 匹配进程,其余不动;幂等。
+    const base = basename(dir)
     const ps = spawn(
       'powershell',
       ['-NoProfile', '-NonInteractive', '-Command',
-        `Get-CimInstance Win32_Process | Where-Object { ($_.Name -match 'node|dsh|electron') -and ($_.CommandLine -like '*${dir}*') } | ForEach-Object { taskkill /F /T /PID $($_.ProcessId) }`],
+        `$d='${dir}'; $b='${base}'; ` +
+        `Get-CimInstance Win32_Process | Where-Object { ($_.Name -match 'node|dsh|electron') -and ($_.CommandLine -like "*$d*" -or $_.CommandLine -like "*$b*") } | ` +
+        `ForEach-Object { taskkill /F /T /PID $($_.ProcessId) }`],
       { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] },
     )
     ps.on('close', () => resolve())
@@ -1136,16 +1161,19 @@ export async function removeFromLibrary(name: string): Promise<CmdResult> {
 
   if (dirExists) {
     // 实例已停,但仍可能有残留进程(孤儿 dsh/node 子进程)占用本地库文件导致删除
-    // 失败——先清掉命令行涉及该目录的残留进程,稍等句柄释放再删。
+    // 失败——先清掉涉及该目录的残留进程(命令行或插件名匹配)。
     await killResidualProcesses(dir)
-    await delay(400)
-    try {
-      removeDirForce(dir)
-    } catch (e) {
-      return { ok: false, code: 1, error: e instanceof Error ? e.message : String(e), affected }
+    // 删除前等句柄释放:反复尝试删除(最长约 6s),多数锁释放后直接删干净,不产生
+    // `.deleting-` 残留。仍被占用才走改名兜底。
+    const deleted = await waitUntilDeletable(dir)
+    if (!deleted) {
+      try {
+        removeDirForce(dir)
+      } catch (e) {
+        return { ok: false, code: 1, error: e instanceof Error ? e.message : String(e), affected }
+      }
     }
-    // 句柄可能尚未完全释放,删除可能留下 `.deleting-` 残留:安排后台多轮延时清理,
-    // 句柄一释放就自动清掉,不再让残留一直占着本地库。
+    // 兜底:即使走了改名仍留了 `.deleting-`,后台多轮延时清理会在句柄释放后自动清掉。
     void cleanupDeletingResidueSoon()
   }
   // 插件已从本地库移除(或本就已移除),连同它的显示名/备注一并清掉,
