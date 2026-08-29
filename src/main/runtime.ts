@@ -53,6 +53,13 @@ export function runtimeInstalled(): boolean {
   return resolveBundledNode() !== null && resolveBundledDshBin() !== null
 }
 
+/** 运行时缺哪个部分:'node' / 'dsh' / null(完整)。用于报「环境未安装」时给出具体缺项。 */
+export function runtimeMissingPart(): 'node' | 'dsh' | null {
+  if (!resolveBundledNode()) return 'node'
+  if (!resolveBundledDshBin()) return 'dsh'
+  return null
+}
+
 /** 当前内置 @deepseek-ai/dsh 的版本;未安装内置运行环境时返回 null。 */
 export function currentDshVersion(): string | null {
   try {
@@ -400,7 +407,9 @@ export async function installRuntime(): Promise<CmdResult> {
     taskProgress(label, 0.42, t('解压 Node', 'Extracting Node'))
     mkdirSync(stage, { recursive: true })
     const okExtract = await extractZip(zip, stage, label)
-    if (!okExtract || !existsSync(inner)) {
+    // 验证解压出的目录里真有 node.exe(下载被截断时 zip 可能解出残缺目录,之前只查
+    // inner 目录会漏过,导致「部署成功但 node 缺失」→ 运行时误报环境未安装)。
+    if (!okExtract || !existsSync(inner) || !existsSync(join(inner, 'node.exe'))) {
       taskDone(label, 1)
       return { ok: false, code: 1, error: t('Node 解压失败(请检查磁盘空间 / 网络)', 'Failed to extract Node (check disk space / network)') }
     }
@@ -440,6 +449,12 @@ export async function installRuntime(): Promise<CmdResult> {
   if (!ins.ok) {
     taskDone(label, ins.code ?? 1)
     return ins
+  }
+  // 部署后同时验证 node 与 dsh 入口。此前只查 dshBin,node 缺失时部署照样报成功,
+  // 但运行时检测 node 失败 → 「环境已装却提示未安装」。现在缺哪个都明确报错。
+  if (!existsSync(nodeExe())) {
+    taskDone(label, 1)
+    return { ok: false, code: 1, error: t(`安装后未找到 node(${nodeExe()})`, `node.exe not found after install (${nodeExe()})`) }
   }
   if (!existsSync(dshBin())) {
     taskDone(label, 1)

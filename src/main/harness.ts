@@ -10,7 +10,7 @@ import { watchPort } from './browser-guard'
 import { getConfig } from './config'
 import { getInstance, getInstances, ensureWorkspace, instanceDshHome, stripBomIfPresent, ensureProfile } from './instances'
 import { t } from './i18n'
-import { bundledEnv, currentDshVersion, resolveBundledDshBin, resolveBundledNode } from './runtime'
+import { bundledEnv, currentDshVersion, dshBin, nodeExe, resolveBundledDshBin, resolveBundledNode, runtimeMissingPart } from './runtime'
 import { broadcast } from './bus'
 import { ensureRuntimeLinks, healBrokenDeps, missingProfilePlugin, removeBrokenPlugin } from './plugins'
 import type { DshInstance, HarnessState, LauncherConfig, LogLine } from '../shared/types'
@@ -236,7 +236,15 @@ function launchPlan(cfg: LauncherConfig, inst: DshInstance): LaunchPlan {
   if (cfg.installMode === 'bundled') {
     const node = resolveBundledNode()
     const bin = resolveBundledDshBin()
-    if (!node || !bin) throw new Error(t('内置运行环境未安装 — 请到「设置 → 运行环境」点击「一键安装运行环境」。', 'Built-in runtime not installed — go to Settings → Runtime and click "Install runtime".'))
+    if (!node || !bin) {
+      // 具体说明缺哪部分,便于排查「部署成功但运行时报未安装」(部署此前未校验 node)。
+      const part = runtimeMissingPart()
+      throw new Error(part === 'node'
+        ? t(`内置运行环境未完整安装(node 缺失: ${nodeExe()})— 请到「设置 → 运行环境」重新一键安装。`, `Built-in runtime is incomplete (node missing: ${nodeExe()}) — re-run the one-click install in Settings → Runtime.`)
+        : part === 'dsh'
+          ? t(`内置运行环境未完整安装(dsh 缺失: ${dshBin()})— 请到「设置 → 运行环境」重新一键安装。`, `Built-in runtime is incomplete (dsh missing: ${dshBin()}) — re-run the one-click install in Settings → Runtime.`)
+          : t('内置运行环境未安装 — 请到「设置 → 运行环境」点击「一键安装运行环境」。', 'Built-in runtime not installed — go to Settings → Runtime and click "Install runtime".'))
+    }
     return {
       cmd: node,
       args: inner,
