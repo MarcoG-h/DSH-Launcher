@@ -44,6 +44,7 @@ the flexibility of the plugin ecosystem becomes something every user can reach.<
 | **One-click deployment** | Built-in portable environment, fully offline, no prerequisites |
 | **Native client UI** | DSH Web embedded in a native window; smoother multi-window experience |
 | **Polished desktop experience** | System tray status light + floating ball + splash animation |
+| **Security system** | Security audit timeline + leak detection to safeguard your account and session data |
 
 > Zero kernel changes: DSH Launcher runs the official dsh, preserving the "everything is a plugin" architecture and all official capabilities.
 > The data directory (`DSH_HOME`) is fully compatible with the CLI: by default it shares your existing directory, so existing sessions / API keys keep working;
@@ -75,6 +76,8 @@ More versions on the [Releases page](https://github.com/MarcoG-h/DSH-Launcher/re
 3. Back in "Console", click **"Start"** — once ready, the app enters the DSH UI automatically and you can start using it.
 4. If you haven't configured an API key yet, enter it in the DSH UI.
 
+![Quick offline deployment - one-click download of the portable runtime](screenshots/one-click-download.png)
+
 **Upgrading**:
 
 - Install the new build over the old one — data is not lost; the installer closes running old processes automatically.
@@ -105,8 +108,6 @@ More versions on the [Releases page](https://github.com/MarcoG-h/DSH-Launcher/re
 - Progress bars while downloading; each plugin inside a bundle is downloaded independently and isolated from the others
 - Third-party plugins often have compatibility issues with each other — the bundles include patches to fix them (see: [plugin packs](https://github.com/baihejiangnan/dsh-plugin-pack-web))
 
-![Recommended bundles](screenshots/bundle.png)
-
 ### New plugin marketplace
 
 - **Category tags**: find plugins by category fast; cards show their matching categories and clicking one filters the list
@@ -120,6 +121,15 @@ More versions on the [Releases page](https://github.com/MarcoG-h/DSH-Launcher/re
 - **Matrix view**: see at a glance which plugin is enabled in which instance; one-click management
 
 ![Plugin matrix](screenshots/matrix.png)
+
+### Security system
+
+- **Security audit timeline**: key security actions and events are laid out on a timeline so you can grasp the state changes at a glance
+- **Leak detection**: automatically monitors whether API credentials / data have been leaked and warns you in time
+
+![Security audit timeline](screenshots/security-audit.png)
+
+![Leak detection](screenshots/security-leak.png)
 
 ### Other features
 
