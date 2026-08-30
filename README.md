@@ -8,7 +8,7 @@
 <a href="https://github.com/MarcoG-h/DSH-Launcher"><img src="https://img.shields.io/github/stars/MarcoG-h/DSH-Launcher?style=flat&label=%E2%AD%90&color=08C" alt="GitHub stars"></a>
 <a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/Windows-10%2F11-4493F8?style=flat" alt="Windows"></a>
 <a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/Desktop-App-47848F?style=flat" alt="Desktop App"></a>
-<a href="https://github.com/MarcoG-h/DSH-Launcher/releases/tag/v3.1.0-beta"><img src="https://img.shields.io/badge/v3.1.0-beta-Release-2EA44F?style=flat" alt="v3.1.0-beta"></a>
+<a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/v3.1.0-beta-Release-2EA44F?style=flat" alt="v3.1.0-beta"></a>
 <a href="https://github.com/MarcoG-h/DSH-Launcher/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
 </p>
 

@@ -8,7 +8,7 @@
 <a href="https://github.com/MarcoG-h/DSH-Launcher"><img src="https://img.shields.io/github/stars/MarcoG-h/DSH-Launcher?style=flat&label=%E2%AD%90&color=08C" alt="GitHub stars"></a>
 <a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/Windows-10%2F11-4493F8?style=flat" alt="Windows"></a>
 <a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/Desktop-App-47848F?style=flat" alt="Desktop App"></a>
-<a href="https://github.com/MarcoG-h/DSH-Launcher/releases/tag/v3.1.0-beta"><img src="https://img.shields.io/badge/v3.1.0-beta-Release-2EA44F?style=flat" alt="v3.1.0-beta"></a>
+<a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/v3.1.0-beta-Release-2EA44F?style=flat" alt="v3.1.0-beta"></a>
 <a href="https://github.com/MarcoG-h/DSH-Launcher/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
 </p>
 
@@ -29,7 +29,6 @@ the flexibility of the plugin ecosystem becomes something every user can reach.<
 </tr>
 </table>
 
-</div>
 
 ---
 
@@ -39,12 +38,16 @@ the flexibility of the plugin ecosystem becomes something every user can reach.<
 | --- | --- |
 | **Parallel instances** | Run multiple DSH instances side by side, each freely configured with different plugin combinations |
 | **Built-in bundles** | Ready-optimized plugin packs for beginners — get started right away |
-| **Plugin marketplace update** | Category tags to find plugins fast; three built-in plugin sources |
+| **Security monitoring** | Security audit timeline + leak detection to safeguard your account and session data |
+| **Plugin marketplace** | Category tags to find plugins fast; three built-in plugin sources |
 | **Local plugin management** | Fully redesigned for multi-instance; avoids duplicate plugin downloads |
 | **One-click deployment** | Built-in portable environment, fully offline, no prerequisites |
 | **Native client UI** | DSH Web embedded in a native window; smoother multi-window experience |
-| **Polished desktop experience** | System tray status light + floating ball + splash animation |
-| **Security system** | Security audit timeline + leak detection to safeguard your account and session data |
+| **Desktop experience** | System tray status light + floating ball + splash animation |
+
+->[V3 intro video](https://www.bilibili.com/video/BV1HDbf65Eyh/?vd_source=ed1422074bd9beff1e11e3fba3c0fff8)<-
+
+</div>
 
 > Zero kernel changes: DSH Launcher runs the official dsh, preserving the "everything is a plugin" architecture and all official capabilities.
 > The data directory (`DSH_HOME`) is fully compatible with the CLI: by default it shares your existing directory, so existing sessions / API keys keep working;
@@ -60,6 +63,7 @@ the flexibility of the plugin ecosystem becomes something every user can reach.<
 | --- | --- | --- |
 | [Installer exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v3.1.0-beta/DSH.Launcher.Setup.3.1.0-beta.exe) | NSIS installer; creates desktop / Start menu shortcuts automatically | ~100 MB |
 | [Simple exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v2.0.3/DSH.Launcher.Setup.2.0.3.exe) | Minimal version without multi-instance, for users running a single DSH | ~100 MB |
+| [Professional Launcher](https://github.com/baihejiangnan/deepseek-harness-desktop) | Multi-instance system, lightweight, not recommended for beginners | ~ 20 MB |
 
 More versions on the [Releases page](https://github.com/MarcoG-h/DSH-Launcher/releases).
 
@@ -85,9 +89,9 @@ More versions on the [Releases page](https://github.com/MarcoG-h/DSH-Launcher/re
 
 ---
 
-## **V3** Features
+## **Features**
 
-### Multi-instance system
+### Multi-instance
 
 - Run multiple isolated DSH instances side by side in one client; each instance has its own config and port
 - Create one for "coding", "chatting", "testing" — switching instances switches the whole plugin environment
@@ -108,6 +112,21 @@ More versions on the [Releases page](https://github.com/MarcoG-h/DSH-Launcher/re
 - Progress bars while downloading; each plugin inside a bundle is downloaded independently and isolated from the others
 - Third-party plugins often have compatibility issues with each other — the bundles include patches to fix them (see: [plugin packs](https://github.com/baihejiangnan/dsh-plugin-pack-web))
 
+---
+
+### Security system
+
+- Read-only monitoring of the dsh core data flow via the [dsh-audit](https://github.com/MarcoG-h/dsh-audit) probe
+- **Audit log timeline**: key security actions and events are laid out on a timeline so you can grasp the state changes at a glance
+
+![Security audit timeline](screenshots/security-audit.png)
+
+- **Leak detection**: automatically monitors whether API credentials / data have been leaked and warns you in time
+
+![Leak detection](screenshots/security-leak.png)
+
+---
+
 ### New plugin marketplace
 
 - **Category tags**: find plugins by category fast; cards show their matching categories and clicking one filters the list
@@ -122,14 +141,7 @@ More versions on the [Releases page](https://github.com/MarcoG-h/DSH-Launcher/re
 
 ![Plugin matrix](screenshots/matrix.png)
 
-### Security system
-
-- **Security audit timeline**: key security actions and events are laid out on a timeline so you can grasp the state changes at a glance
-- **Leak detection**: automatically monitors whether API credentials / data have been leaked and warns you in time
-
-![Security audit timeline](screenshots/security-audit.png)
-
-![Leak detection](screenshots/security-leak.png)
+---
 
 ### Other features
 
@@ -190,7 +202,7 @@ pnpm dist           # electron-vite build + electron-builder --win → release/
 ## Contributing
 
 - [@MarcoG-h](https://github.com/MarcoG-h) — project initiator & maintainer
-- [@baihejiangnan](https://github.com/baihejiangnan) — recommended bundle contributor & maintainer
+- [@baihejiangnan](https://github.com/baihejiangnan) — initiator & maintainer of the dsh-plugin-pack bundles; source of inspiration
 
 ## License
 
