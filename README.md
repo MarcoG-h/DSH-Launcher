@@ -28,7 +28,7 @@ DSH Web 直接内嵌在客户端窗口里。</p>
 </tr>
 </table>
 
-</div>
+
 
 ---
 
@@ -38,12 +38,16 @@ DSH Web 直接内嵌在客户端窗口里。</p>
 | --- | --- |
 | **多实例并行** | 支持多开DSH，每一套DSH实例可自由配置不同插件组合 |
 | **内置整合包** | 为新手提供多套已优化的插件组合，上手即用 |
-| **插件市场更新** | 分类快速找到想要的插件，内置三种插件源 |
+| **安全监测** | 安全审计时间轴 + 泄露检测，守护账号与会话数据安全 |
+| **插件市场** | 分类快速找到想要的插件，内置三种插件源 |
 | **本地插件管理** | 系统全新升级，适配多实例，避免重复下载插件 |
 | **一键部署** | 内置独立环境 , 无需准备 , 全程一键,离线可用 |
 | **客户端界面** | DSH Web 直接内嵌在原生窗口，多开更丝滑 |
-| **优雅桌面体验** | 系统托盘三态状态灯 + 悬浮球 + 开屏动画 |
-| **安全系统** | 安全审计时间轴 + 泄露检测，守护账号与会话数据安全 |
+| **桌面体验** | 系统托盘三态状态灯 + 悬浮球 + 开屏动画 |
+
+->[V3版本介绍](https://www.bilibili.com/video/BV1HDbf65Eyh/?vd_source=ed1422074bd9beff1e11e3fba3c0fff8)<-
+
+</div>
 
 > 内核零改动:DSH Launcher 直接运行官方 dsh,完整保留「一切皆插件」架构与全部官方能力。
 > 数据目录(`DSH_HOME`)与 CLI 完全兼容:默认共享已有目录,已有会话 / API Key 直接生效;
@@ -59,10 +63,9 @@ DSH Web 直接内嵌在客户端窗口里。</p>
 | --- | --- | --- |
 | [安装版 exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v3.1.0-beta/DSH.Launcher.Setup.3.1.0-beta.exe) | NSIS 安装到系统,自动创建桌面 / 开始菜单快捷方式 | ~100 MB |
 | [简单版 exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v2.0.3/DSH.Launcher.Setup.2.0.3.exe) | 不带多实例的极简版本,适合只需单个 DSH 的用户 | ~100 MB |
-
+| [专业版Launcher](https://github.com/baihejiangnan/deepseek-harness-desktop) | 多实例系统，轻量化，新手不推荐 | ~ 20 MB |
 更多版本见 [Releases 页面](https://github.com/MarcoG-h/DSH-Launcher/releases)。
 
-另提供专业版：[专业版DSH-Launcher](https://github.com/baihejiangnan/deepseek-harness-desktop)
 
 📺 快速上手视频教程:[BiliBili](https://www.bilibili.com/video/BV1BMbR64EoQ/?vd_source=ed1422074bd9beff1e11e3fba3c0fff8)
 
@@ -86,9 +89,9 @@ DSH Web 直接内嵌在客户端窗口里。</p>
 
 ---
 
-## **V3新功能**介绍
+## **新功能**介绍
 
-### 多实例体系
+### 多实例
 
 - 一套客户端并行运行多个互不干扰的 DSH 实例,每个实例拥有独立配置与端口
 - 可以给「写代码」「日常聊天」「跑测试」各建一个实例,切换实例 = 切换整套插件环境
@@ -109,7 +112,20 @@ DSH Web 直接内嵌在客户端窗口里。</p>
 - 下载过程显示进度条，整合包内插件均独立下载，相互隔离
 - 对于第三方插件，常有插件之间的兼容性问题，整合包加入补丁修复兼容问题（详见：[插件包](https://github.com/baihejiangnan/dsh-plugin-pack-web)）
 
+---
 
+### 安全系统
+
+- 通过[dsh-audit](https://github.com/MarcoG-h/dsh-audit)探针来只读监测dsh核心数据流变化
+- **审计日志时间轴**：以时间轴形式清晰呈现关键安全操作与事件记录，一眼掌握状态变化
+
+![安全审计时间轴](screenshots/security-audit.png)
+
+- **泄露检测**：自动监测 API 凭据 / 数据是否泄露，发现风险及时预警
+
+![泄露检测](screenshots/security-leak.png)
+
+---
 
 ### 新版插件市场
 
@@ -125,14 +141,7 @@ DSH Web 直接内嵌在客户端窗口里。</p>
 
 ![插件矩阵](screenshots/matrix.png)
 
-### 安全系统
-
-- **安全审计时间轴**：以时间轴形式清晰呈现关键安全操作与事件记录，一眼掌握状态变化
-- **泄露检测**：自动监测 API 凭据 / 数据是否泄露，发现风险及时预警
-
-![安全审计时间轴](screenshots/security-audit.png)
-
-![泄露检测](screenshots/security-leak.png)
+---
 
 ### 其余功能
 
@@ -190,7 +199,7 @@ pnpm dist           # electron-vite build + electron-builder --win → release/
 ## 贡献
 
 - [@MarcoG-h](https://github.com/MarcoG-h) — 项目发起者与维护者
-- [@baihejiangnan](https://github.com/baihejiangnan) — 推荐整合包贡献者与维护者
+- [@baihejiangnan](https://github.com/baihejiangnan) — 整合包dsh-plugin-pack发起者与维护者；灵感提供者
 
 ## License
 
