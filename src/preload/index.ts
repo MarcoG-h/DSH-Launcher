@@ -67,13 +67,6 @@ const api: DshLauncherApi = {
       ipcRenderer.removeListener('orb:clicked', listener)
     }
   },
-  onWindowDragging: (cb) => {
-    const listener = (_e: Electron.IpcRendererEvent, dragging: boolean): void => cb(Boolean(dragging))
-    ipcRenderer.on('window:dragging', listener)
-    return () => {
-      ipcRenderer.removeListener('window:dragging', listener)
-    }
-  },
   onEvent: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, data: LauncherEvent): void => cb(data)
     ipcRenderer.on('harness:event', listener)

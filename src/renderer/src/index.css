@@ -65,12 +65,6 @@
   to { --glow-angle: 360deg; }
 }
 
-/* 窗口拖动中:暂停所有关键帧动画,降低拖动期间的单层合成开销(流光/脉冲等持续动画
-   会被从合成器的活动动画集里移除,不再每帧重画)。拖动是瞬态,结束后即时恢复。 */
-.window-dragging * {
-  animation-play-state: paused !important;
-}
-
 /* 侧边栏安全告警弹窗:呼吸脉冲 */
 @keyframes security-alert-pulse {
   0%, 100% { opacity: 1; }
@@ -169,8 +163,6 @@
 /* 设置了背景图时,左侧栏也半透显示图片(扁平模式同样生效) */
 :root[data-bg-image="set"] .app-sidebar {
   background: rgba(19, 24, 32, 0.72);
-  backdrop-filter: blur(22px) saturate(1.45);
-  -webkit-backdrop-filter: blur(22px) saturate(1.45);
 }
 :root[data-theme="light"][data-bg-image="set"] .app-sidebar {
   background: rgba(255, 255, 255, 0.7);
@@ -220,8 +212,6 @@
     0 0 0 1px rgba(255, 255, 255, 0.03),
     inset 0 1px 0 rgba(255, 255, 255, 0.1),
     inset 0 -1px 0 rgba(255, 255, 255, 0.02);
-  backdrop-filter: blur(48px) saturate(1.45);
-  -webkit-backdrop-filter: blur(48px) saturate(1.45);
 }
 
 :root[data-style="glass"] .card:hover {
@@ -253,8 +243,6 @@
     0 10px 32px rgba(28, 44, 70, 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
     inset 0 -1px 0 rgba(28, 44, 70, 0.07);
-  backdrop-filter: blur(40px) saturate(1.4);
-  -webkit-backdrop-filter: blur(40px) saturate(1.4);
 }
 
 /* 弹层背后虚化:盖在内容上的遮罩在玻璃模式下只做半透明压暗。
@@ -279,8 +267,6 @@
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.09),
     inset -1px 0 0 rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(44px) saturate(1.5);
-  -webkit-backdrop-filter: blur(44px) saturate(1.5);
 }
 :root[data-theme="light"][data-style="glass"] .app-sidebar {
   background:
@@ -337,8 +323,6 @@
     0 0 14px color-mix(in srgb, var(--accent) 12%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.12),
     0 3px 12px rgba(0, 0, 0, 0.16);
-  backdrop-filter: blur(16px) saturate(1.5);
-  -webkit-backdrop-filter: blur(16px) saturate(1.5);
 }
 :root[data-theme="light"][data-style="glass"] .nav-item[data-active="true"] {
   background:
@@ -358,8 +342,6 @@
 :root[data-style="glass"] .modal,
 :root[data-style="glass"] .matrix-cell-menu,
 :root[data-style="glass"] .detail-modal {
-  backdrop-filter: blur(26px) saturate(1.45);
-  -webkit-backdrop-filter: blur(26px) saturate(1.45);
 }
 
 html,

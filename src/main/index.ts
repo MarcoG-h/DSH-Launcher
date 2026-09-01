@@ -65,15 +65,10 @@ function createWindow(): BrowserWindow {
       preload: preloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
-      // The DSH view is a native child view drawn on top of this window's
-      // renderer — while the embedded page covers the window, Chromium treats
-      // the launcher renderer as backgrounded and throttles requestAnimationFrame
-      // to (almost) nothing. The sidebar ↔ DSH width animation below lives on
-      // rAF, so without this the sidebar appears stuck until the window is
-      // resized (which forces a relayout). A launcher that always needs to
-      // respond should never throttle its own frames.
-      backgroundThrottling: false
+      sandbox: false
+      // 诊断测试:临时去掉 backgroundThrottling: false。dsh 内嵌盖住窗口时,Chromium
+      // 会把被遮挡的 launcher 渲染层节流,不再满帧渲染背后多余内容(卡顿主因候选)。
+      // 代价:侧边栏宽度动画(150ms rAF)可能变卡——确认卡顿改善后再把动画移到主进程修。
     }
   })
 

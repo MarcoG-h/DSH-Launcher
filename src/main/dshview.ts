@@ -36,38 +36,47 @@ let trailingTimer: ReturnType<typeof setTimeout> | null = null
 // 否则 setVisible(true/false) 不会执行 → 网页聊天打不开。
 let lastLayout: { w: number; h: number; x: number; activeId: string | null } | null = null
 
-// --- 窗口拖动降负载 ---
-// WebContentsView 是独立合成器/GPU surface,窗口拖动时 DWM 每帧要把 launcher 渲染层
-// 和内嵌页两层一起重画,低配机器明显卡顿。resize 节流只挂 resize 事件,管不到 move;
-// 这里单独检测拖动:连续两次 move 间隔短于 DRAG_BURST_WINDOW 判定「拖动中」,立即把
-// 全部内嵌视图挂起(只留 launcher 单层合成),停稳 DRAG_SETTLE_MS 后恢复。同时把拖动
-// 状态广播给渲染层,暂停无限 CSS 动画,进一步降低拖动期间的单层合成开销。
-const DRAG_BURST_WINDOW = 120 // 两次 move 间隔短于该值视为正在拖动
-const DRAG_SETTLE_MS = 250 // 最后一次 move 后停稳该时长 → 拖动结束
+// --- 拖动/缩放时冻结内嵌页 ---
+// 内嵌 dsh 是独立 GPU 表面,拖动时它若持续满帧刷新,DWM 每帧重画两层会卡。检测拖动
+// (轮询位置/尺寸,模态循环里可靠),拖动中把内嵌页限帧到 DRAG_FPS(1fps,可见但基本
+// 不刷新),停稳 DRAG_SETTLE_MS 后恢复 —— 停稳瞬间补一帧。launcher 侧已去掉
+// backgroundThrottling:false,被 dsh 遮挡时自身会被节流成静态,所以只剩这一个活跃源。
+const DRAG_SETTLE_MS = 500 // 位置/尺寸连续不变该时长 → 结束(宽松)
+const DRAG_POLL_MS = 100
+const DRAG_FPS = 1 // 拖动中内嵌页帧率(≈冻结)
+const RESTORE_FPS = 60
 let dragging = false
-let lastMoveAt = 0
-let dragSettleTimer: ReturnType<typeof setTimeout> | null = null
+let lastX = 0
+let lastY = 0
+let lastW = 0
+let lastH = 0
+let stillSince = 0
+let dragPoll: ReturnType<typeof setInterval> | null = null
 
 function setDragging(next: boolean): void {
   if (dragging === next) return
   dragging = next
-  // 隐藏/恢复视图必须绕过 lastLayout 免重排判断,否则 setVisible 不会真正执行。
-  lastLayout = null
-  relayout()
-  // 广播给渲染层暂停无限动画(流光/脉冲),拖动结束后恢复。
-  win?.webContents.send('window:dragging', next)
+  for (const [, v] of views) {
+    v.webContents.setFrameRate(next ? DRAG_FPS : RESTORE_FPS)
+  }
 }
 
-function onHostMove(): void {
-  const now = Date.now()
-  // 第一次 move 只记时间;第二次起如果间隔很短,说明用户在拖动窗口。
-  if (!dragging && lastMoveAt !== 0 && now - lastMoveAt <= DRAG_BURST_WINDOW) setDragging(true)
-  lastMoveAt = now
-  if (dragSettleTimer) clearTimeout(dragSettleTimer)
-  dragSettleTimer = setTimeout(() => {
-    dragSettleTimer = null
-    if (dragging) setDragging(false)
-  }, DRAG_SETTLE_MS)
+/** 轮询窗口位置/尺寸:任一变化即拖动/缩放中;连续 DRAG_SETTLE_MS 不变 → 结束。 */
+function pollDrag(): void {
+  if (!win) return
+  const [x, y] = win.getPosition()
+  const [w, h] = win.getSize()
+  const changed = x !== lastX || y !== lastY || w !== lastW || h !== lastH
+  lastX = x
+  lastY = y
+  lastW = w
+  lastH = h
+  if (changed) {
+    stillSince = Date.now()
+    if (!dragging) setDragging(true)
+  } else if (dragging && Date.now() - stillSince >= DRAG_SETTLE_MS) {
+    setDragging(false)
+  }
 }
 
 function scheduleRelayout(): void {
@@ -81,8 +90,13 @@ function scheduleRelayout(): void {
 export function registerDshView(host: BrowserWindow): void {
   win = host
   host.on('resize', scheduleRelayout)
-  // 拖动检测:move 不触发 resize,节流管不到,单独处理(见上方 onHostMove)。
-  host.on('move', onHostMove)
+  const [ix, iy] = host.getPosition()
+  const [iw, ih] = host.getSize()
+  lastX = ix
+  lastY = iy
+  lastW = iw
+  lastH = ih
+  dragPoll = setInterval(pollDrag, DRAG_POLL_MS)
   // 新版 dsh 认证 token 到达时,若该实例是活动视图,用带 token 的 URL 重载
   // (否则内嵌视图加载的是基础 URL,会 401「authentication required」)。
   onInstanceAuthUrl((id, url) => {
@@ -94,8 +108,8 @@ export function registerDshView(host: BrowserWindow): void {
     }
   })
   host.on('closed', () => {
-    if (dragSettleTimer) clearTimeout(dragSettleTimer)
-    dragSettleTimer = null
+    if (dragPoll) clearInterval(dragPoll)
+    dragPoll = null
     dragging = false
     for (const v of views.values()) v.webContents.close()
     views.clear()
@@ -169,10 +183,34 @@ function ensureViewFor(instanceId: string): WebContentsView | null {
   return v
 }
 
-/** Keep the view flush against the sidebar after it expands/collapses. */
+let sidebarAnimTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * Keep the view flush against the sidebar after it expands/collapses. 动画在主进程跑
+ * (150ms easing,与渲染层原 CSS 过渡一致):渲染层被内嵌 dsh 遮挡时 rAF 会被节流,
+ * 不能再靠渲染层驱动 —— 否则为迁就它就得关掉 backgroundThrottling(那是卡顿主因)。
+ * 主进程 setTimeout 不受遮挡影响,天然平滑。
+ */
 export function setDshSidebarWidth(width: number): void {
-  sidebarWidth = width
-  relayout()
+  if (sidebarAnimTimer) clearTimeout(sidebarAnimTimer)
+  const from = sidebarWidth
+  if (from === width) { relayout(); return }
+  const t0 = Date.now()
+  const DUR = 150
+  const tick = (): void => {
+    const p = Math.min(1, (Date.now() - t0) / DUR)
+    const eased = 1 - Math.pow(1 - p, 3)
+    sidebarWidth = Math.round(from + (width - from) * eased)
+    relayout()
+    if (p < 1) {
+      sidebarAnimTimer = setTimeout(tick, 16)
+    } else {
+      sidebarWidth = width
+      relayout()
+      sidebarAnimTimer = null
+    }
+  }
+  sidebarAnimTimer = setTimeout(tick, 16)
 }
 
 let webChatUrl = WEB_CHAT_URL
@@ -244,12 +282,6 @@ export function removeDshView(instanceId: string): void {
 
 function relayout(): void {
   if (!win) return
-  // 拖动中:全部挂起,只留 launcher 一层合成。尺寸停稳后再算(停稳时 setDragging(false)
-  // 会把 lastLayout 置空并强制重排,届时恢复视图并补齐精确 bounds)。
-  if (dragging) {
-    for (const [, v] of views) v.setVisible(false)
-    return
-  }
   const [w, h] = win.getContentSize()
   const x = sidebarWidth
   // 尺寸与活动视图都未变才跳过,避免 setBounds 空跑;活动视图变了则必须重排。

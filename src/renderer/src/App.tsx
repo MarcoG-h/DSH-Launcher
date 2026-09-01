@@ -102,33 +102,12 @@ function Shell(): JSX.Element {
   // in orb mode the rail is gone, so the native view spans the full window.
   const dshWidth = orbMode ? 0 : collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED
 
-  // The sidebar's width transition is pure CSS; the DSH view is a native child
-  // view so it can't transition — animate it with the same easing/duration here
-  // so the embedded page slides in step with the rail instead of jumping.
-  const widthAnim = useRef(dshWidth)
-  useEffect(() => {
-    const from = widthAnim.current
-    const to = dshWidth
-    widthAnim.current = to
-    if (from === to) return
-    const DUR = 150
-    const t0 = performance.now()
-    let raf = 0
-    const step = (): void => {
-      const p = Math.min(1, (performance.now() - t0) / DUR)
-      const eased = 1 - Math.pow(1 - p, 3)
-      api.setDshSidebarWidth(Math.round(from + (to - from) * eased))
-      if (p < 1) raf = requestAnimationFrame(step)
-    }
-    raf = requestAnimationFrame(step)
-    return () => cancelAnimationFrame(raf)
-  }, [dshWidth])
-  // 初始挂载同步侧边栏宽度到主进程(动画 effect 在 from===to 时早退,不发送),
-  // 否则折叠/展开初始态下内嵌视图(DSH/网页聊天)会盖错位置。
+  // 宽度变化直接把目标值发给主进程,由主进程做 150ms easing 动画(渲染层被内嵌 dsh
+  // 遮挡时 rAF 会节流,不能再用渲染层驱动;主进程 setTimeout 不受影响)。初始挂载也走
+  // 这里(from===to 时主进程直接 no-op)。
   useEffect(() => {
     api.setDshSidebarWidth(dshWidth)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [dshWidth])
 
   // Show the floating orb while the DSH view is open in orb mode.
   useEffect(() => {
@@ -141,13 +120,6 @@ function Shell(): JSX.Element {
     return api.onOrbClicked(() => {
       setCollapsed(false)
     })
-  }, [])
-
-  // 窗口拖动时主进程广播:挂起内嵌视图并暂停无限动画,降低拖动期间合成开销。
-  // 根节点加 .window-dragging 类,CSS 里统一 animation-play-state: paused。
-  const [windowDragging, setWindowDragging] = useState(false)
-  useEffect(() => {
-    return api.onWindowDragging(setWindowDragging)
   }, [])
 
   // Popped-out instances (running in a launcher child window) toggle back to the
@@ -183,7 +155,7 @@ function Shell(): JSX.Element {
   const page = view === 'dsh' ? 'dashboard' : (view as PageId)
 
   return (
-    <div className={`flex h-full${windowDragging ? ' window-dragging' : ''}`}>
+    <div className="flex h-full">
       {(config?.splashEnabled ?? true) && !splashDone && <SplashOverlay onDone={() => setSplashDone(true)} />}
       {/* Always mounted (width animates to 0 in orb mode) so the rail's content
           can't pop in/out; overflow-hidden on the rail clips it at width 0. */}

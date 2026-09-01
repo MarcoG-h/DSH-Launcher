@@ -531,8 +531,6 @@ export interface DshLauncherApi {
   orbClick(): void
   /** Fired when the floating orb is clicked — the launcher should expand its sidebar. */
   onOrbClicked(cb: () => void): () => void
-  /** Main → renderer: window is being dragged (suspend heavy CSS animations). */
-  onWindowDragging(cb: (dragging: boolean) => void): () => void
   onEvent(cb: (e: LauncherEvent) => void): () => void
   clearLogs(): Promise<boolean>
   confirm(message: string): Promise<boolean>
