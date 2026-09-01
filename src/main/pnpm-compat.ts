@@ -21,8 +21,8 @@ export function pluginArgsFor(profileDirPath: string, pluginArgs: string[]): str
 /** 一个被识别出的 pnpm 失败,带面向用户的可操作说明。 */
 export interface PnpmFailure {
   code: 'adding-to-root' | 'not-a-workspace' | 'hoist-pattern-diff' | 'pnpm-missing' | 'release-age-violation'
-    | 'ignored-builds' | 'git-prepare-not-allowed' | 'fetch-404' | 'transient-network' | 'fetch-timeout'
-    | 'unexpected-store'
+    | 'ignored-builds' | 'git-prepare-not-allowed' | 'git-network' | 'llama-binary' | 'fetch-404'
+    | 'transient-network' | 'fetch-timeout' | 'unexpected-store'
   /** 双语的、可操作的提示(替代原始报错墙)。 */
   message: string
   /** true = 重跑 `pnpm install` 是文档记载的恢复方式。 */
@@ -95,6 +95,27 @@ export function classifyPnpmFailure(output: string): PnpmFailure | null {
       code: 'git-prepare-not-allowed',
       recoverable: false,
       message: '这个 git 插件需要在安装时执行构建脚本,被 pnpm 默认拦截。允许构建脚本后重试即可 / this git-hosted plugin needs to run its build script at install time, which pnpm blocks by default — allow build scripts and retry',
+    }
+  }
+  // GitHub 直装插件(`github:owner/repo` / `git+…`)在拉取仓库时网络失败时,git 的
+  // stderr(fatal: …)原样透出,匹配不到上面的 pnpm 报错码(isTransientPnpmFailure
+  // 的正则也只认 pnpm 的 FETCH_5xx / 节点层网络词)。若不单独识别,这类插件首次失败
+  // 就「一击即死」,没有任何重试。这里归为网络类,由调用方自动重试一次。
+  if (/(?:fatal: unable to access|fatal: could not read from remote repository|fatal: unable to look up|fatal: could not resolve host|could not resolve host: github|failed to connect to (?:codeload\.)?github\.com|github\.com port \d+: connection refused|the remote end hung up unexpectedly|early eof|rpc failed)/i.test(output)) {
+    return {
+      code: 'git-network',
+      recoverable: false,
+      message: '拉取 GitHub 仓库失败(无法连上 GitHub)。已自动重试一次;若仍失败,说明当前网络到 GitHub 不通,稍后再试 / failed to fetch the GitHub repo (cannot reach GitHub); retried once — if it still fails the network to GitHub is blocked, try again later',
+    }
+  }
+  // node-llama-cpp 等模型引擎依赖:postinstall 要从 GitHub Releases 下载大体积二进制。
+  // 下载失败会让 pnpm 把整个 add 判失败,容易误以为插件坏了。单独识别并重试,
+  // 提示真正的问题(引擎二进制下载,不是插件本身)。
+  if (/(?:failed to (?:download|find|get).*?llama|llama.*?failed to (?:download|find))/i.test(output)) {
+    return {
+      code: 'llama-binary',
+      recoverable: false,
+      message: '下载 llama 引擎二进制失败(该插件依赖本地模型引擎,二进制从 GitHub Releases 下载)。已自动重试一次;若仍失败,通常是网络到 GitHub 不通,稍后再试 / failed to download the llama engine binary (the plugin needs a local model engine whose binary is fetched from GitHub Releases); retried once — if it still fails the network to GitHub is likely blocked',
     }
   }
   if (output.includes('ERR_PNPM_FETCH_404')) {

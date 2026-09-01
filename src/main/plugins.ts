@@ -199,14 +199,17 @@ function dshPluginCmd(home: string, profile: string, extra: string[]): { cmd: st
  * 执行一次 dsh plugin 命令,带 pnpm 陷阱自动恢复(照抄 dsh-market 的 withHoistRecovery):
  * - pnpm 大版本漂移(hoist-pattern-diff)→ 重建 install 后重试一次
  * - release-age 锁 → 一次性 minimumReleaseAge=0 绕过重试
+ * - GitHub 直装仓库拉取失败(git-network)→ 原样重试一次,仍失败依次走镜像重写
+ * - 模型引擎二进制下载失败(llama-binary)→ 原样重试一次
  * - 瞬时网络失败 → 原样重试一次
  * - fetch 超时 → 更长 fetchTimeout 重试一次
+ * - fetch 404(镜像未同步)→ 短延迟重试镜像,再直连官方 npmjs 兜底
  * 失败仍存活时,若识别出具体陷阱,把可操作提示附加到 error(替代原始报错墙)。
  */
-async function runPluginCommand(home: string, profile: string, extra: string[], label: string): Promise<CmdResult> {
-  const runOnce = (args: string[]): Promise<CmdResult> => {
-    const { cmd, args: base, cwd, envPatch } = dshPluginCmd(home, profile, args)
-    return runAsync(cmd, base, cwd, label, process.platform === 'win32', envPatch)
+async function runPluginCommand(home: string, profile: string, extra: string[], label: string, envPatch?: NodeJS.ProcessEnv): Promise<CmdResult> {
+  const runOnce = (args: string[], patch?: NodeJS.ProcessEnv): Promise<CmdResult> => {
+    const { cmd, args: base, cwd, envPatch: baseEnv } = dshPluginCmd(home, profile, args)
+    return runAsync(cmd, base, cwd, label, process.platform === 'win32', { ...baseEnv, ...envPatch, ...patch })
   }
   const ok = (r: CmdResult): boolean => r.ok
   let r = await runOnce(extra)
@@ -220,6 +223,29 @@ async function runPluginCommand(home: string, profile: string, extra: string[], 
   } else if (failure?.code === 'release-age-violation' && (extra[0] === 'add' || extra[0] === 'remove')) {
     taskLine(label, t('[install] pnpm 安全等待期拦截,正在放行重试…', '[install] pnpm fresh-release hold; bypassing and retrying…'), 'stderr')
     r = await runOnce([extra[0], '--config.minimumReleaseAge=0', ...extra.slice(1)])
+  } else if (failure?.code === 'git-network' && (extra[0] === 'add' || extra[0] === 'remove')) {
+    // GitHub 直装插件拉取仓库失败:git 的 stderr 不在瞬时网络正则里。先原样重试一次
+    // (瞬时抖动),仍失败就依次用镜像重写重试(GIT_CONFIG_* 进程级注入,不改用户全局配置)。
+    r = await runOnce(extra)
+    for (const mirror of GIT_MIRROR_REWRITES) {
+      if (ok(r)) break
+      taskLine(label, t(`[install] 直连 GitHub 失败,改用镜像 ${mirror.name} 重试…`, `[install] direct GitHub fetch failed; retrying via mirror ${mirror.name}…`), 'stderr')
+      r = await runOnce(extra, mirror.env)
+    }
+  } else if (failure?.code === 'llama-binary' && (extra[0] === 'add' || extra[0] === 'remove')) {
+    // 模型引擎二进制下载失败(可能瞬时网络抖动),原样重试一次再判死。
+    taskLine(label, t('[install] 下载 llama 引擎二进制失败,自动重试一次…', '[install] llama engine binary download failed; retrying once…'), 'stderr')
+    r = await runOnce(extra)
+  } else if (failure?.code === 'fetch-404' && (extra[0] === 'add' || extra[0] === 'remove')) {
+    // 刚发布的包 registry/镜像可能还没同步完:先短等重试镜像,仍 404 就直连官方 npmjs
+    // (发布源头,一定是最新,且公开包无需登录)。
+    taskLine(label, t('[install] 某个依赖在 registry 上暂时取不到(可能刚发布、镜像未同步),稍候重试…', '[install] a dependency is momentarily unavailable on the registry (fresh publish / mirror not synced); retrying shortly…'), 'stderr')
+    await delay(1500)
+    r = await runOnce(extra)
+    if (!ok(r)) {
+      taskLine(label, t('[install] 镜像仍未同步,改用官方 npmjs 源重试一次…', '[install] mirror still not synced; retrying once via the official npmjs registry…'), 'stderr')
+      r = await runOnce([extra[0], '--config.registry=https://registry.npmjs.org/', ...extra.slice(1)])
+    }
   } else if (failure?.code === 'transient-network' && (extra[0] === 'add' || extra[0] === 'remove')) {
     taskLine(label, t('[install] 拉取依赖时网络临时失败,自动重试一次…', '[install] transient network failure; retrying once…'), 'stderr')
     r = await runOnce(extra)
@@ -543,11 +569,64 @@ function parseAllowBuildsKey(stderr: string | undefined): string | null {
   return null
 }
 
+/** 安装源是否为 git(GitHub)直装:这类插件优先走 npm 包,网络不行再镜像。 */
+function isGitHostedSpec(spec: string): boolean {
+  return /^(?:git\+|github:|git@|git:\/\/|https?:\/\/github\.com\/)/i.test(spec.trim())
+}
+
+// GitHub 直连拉取失败时的镜像兜底。用 GIT_CONFIG_* 进程级注入 git url 重写
+// (url.<base>.insteadOf),不改用户全局 git 配置;pnpm 拉 git 依赖的子进程会继承。
+// 镜像可用性动态变化,失败时依次尝试。
+const GIT_MIRROR_REWRITES: Array<{ name: string; env: NodeJS.ProcessEnv }> = [
+  { name: 'gh-proxy.com', env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'url.https://gh-proxy.com/https://github.com/.insteadOf', GIT_CONFIG_VALUE_0: 'https://github.com/' } },
+  { name: 'gitclone.com', env: { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'url.https://gitclone.com/github.com/.insteadOf', GIT_CONFIG_VALUE_0: 'https://github.com/' } }
+]
+
+/** 极简 semver 比较(旧版兜底选版用,不做 prerelease 语义)。 */
+function cmpSemver(a: string, b: string): number {
+  const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0)
+  const pb = String(b).split('.').map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0)
+  }
+  return 0
+}
+
+/**
+ * 最新版不可得时的旧版兜底:查 npmmirror 上该包可用版本,取「非 latest 的最近一个」重试。
+ * 针对镜像同步滞后(latest 已发布但镜像还没就绪)或最新版损坏的情况。
+ */
+async function installOlderVersion(home: string, profile: string, name: string, flags: string[] | undefined, label: string): Promise<CmdResult | null> {
+  try {
+    const regName = name.startsWith('@') ? `@${name.slice(1).replace('/', '%2f')}` : name
+    const res = await fetch(`https://registry.npmmirror.com/${regName}`, { signal: AbortSignal.timeout(8000) })
+    if (!res.ok) return null
+    const meta = await res.json() as { versions?: Record<string, unknown>; 'dist-tags'?: Record<string, string> }
+    const versions = Object.keys(meta.versions ?? {})
+    if (versions.length === 0) return null
+    const latest = meta['dist-tags']?.latest
+    const prev = [...versions].sort((a, b) => cmpSemver(b, a)).find((v) => v !== latest)
+    if (!prev) return null
+    taskLine(label, t(`最新版不可得,退回上一版本 ${name}@${prev}…`, `latest unavailable; falling back to previous version ${name}@${prev}…`), 'stderr')
+    const r = await runPluginCommand(home, profile, ['add', `${name}@${prev}`, ...(flags ?? [])], `${label}:old`)
+    return r.ok ? r : null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Install a plugin (local path or npm spec) into a profile via `dsh plugin add`
  * and enable it for that profile. With a known `name` we enable explicitly
  * (also self-heals legacy "installed but not enabled" entries); otherwise the
  * newly-added dependency is detected by diffing the manifest and enabled.
+ *
+ * 安装韧性阶梯(策略:npm 直连优先 → 网络不行走镜像 → 没有新版退旧版):
+ * 1) git 源且给了包名时,先试 registry 上的 <name>(国内走 npmmirror,快而稳,
+ *    且不用 git —— 顺带让没装 git 的用户也能装上已发 npm 的插件);
+ * 2) 原 spec 直装;git 源先确保 git 可用(免装 git 补丁),网络失败时 runPluginCommand
+ *    内部依次走 GitHub 镜像重写,镜像不同步的 404 会直连官方 npmjs;
+ * 3) 最新版仍不可得时,退回 registry 上可用的上一版本。
  */
 export async function install(home: string, profile: string, spec: string, name?: string, flags?: string[]): Promise<CmdResult> {
   if (!spec.trim()) return { ok: false, code: null, error: t('安装源为空。', 'Empty install source.') }
@@ -556,17 +635,46 @@ export async function install(home: string, profile: string, spec: string, name?
   // 否则 node-llama-cpp 等原生依赖的跨平台二进制会让整个 profile 的安装失败。
   ensureProfilePnpmSettings(home, profile)
   const before = depNames(home, profile)
-  let r = await runPluginCommand(home, profile, ['add', target, ...(flags ?? [])], `install:${target}`)
-  if (!r.ok) {
+  const gitSpec = isGitHostedSpec(spec)
+  const label = `install:${target}`
+
+  let r: CmdResult | null = null
+
+  // 1) npm 优先:git 源 + 给了包名 → 先试 registry 上的 <name>。包没发 npm 会 404,
+  //    自动落到下面的 git 路径。
+  if (gitSpec && name) {
+    r = await runPluginCommand(home, profile, ['add', name, ...(flags ?? [])], `install:${name}`)
+    if (r.ok) {
+      setEnabled(home, profile, name, true)
+      return r
+    }
+  }
+
+  // 2) 原 spec 直装。git 源先确保 git 可用(免装 git 补丁),拿不到 git 就直接报友好错误。
+  const gitEnv = gitSpec ? await ensureGitEnvFor(label) : undefined
+  if (gitSpec && gitEnv === null) {
+    r = { ok: false, code: null, error: t('本机未安装 Git,且自动下载便携版失败。请安装 Git:https://git-scm.com/download/win', 'Git is not installed on this machine and the portable Git download failed. Please install Git: https://git-scm.com/download/win') }
+  } else {
+    const env: NodeJS.ProcessEnv | undefined = gitEnv ?? undefined
+    r = await runPluginCommand(home, profile, ['add', target, ...(flags ?? [])], label, env)
     // pnpm 10 blocks git-hosted packages that run build scripts unless they're
     // in the profile's allowBuilds whitelist. Self-heal: whitelist the package
     // and retry once. Without this, such plugins permanently fail to install.
-    const blocked = parseAllowBuildsKey(r.stderr)
-    if (blocked && allowBuildsWhitelist(home, profile, blocked)) {
-      taskLine(`install:${target}`, t(`检测到 pnpm allowBuilds 白名单缺失,已加入 ${blocked} 并重试…`, `Detected missing allowBuilds whitelist entry; added ${blocked} and retrying…`), 'stderr')
-      r = await runPluginCommand(home, profile, ['add', target, ...(flags ?? [])], `install:${target}`)
+    if (!r.ok) {
+      const blocked = parseAllowBuildsKey(r.stderr)
+      if (blocked && allowBuildsWhitelist(home, profile, blocked)) {
+        taskLine(label, t(`检测到 pnpm allowBuilds 白名单缺失,已加入 ${blocked} 并重试…`, `Detected missing allowBuilds whitelist entry; added ${blocked} and retrying…`), 'stderr')
+        r = await runPluginCommand(home, profile, ['add', target, ...(flags ?? [])], label, env)
+      }
     }
   }
+
+  // 3) 最新版仍拿不到 → 旧版兜底(registry 上存在该包、但最新版不可得时)。
+  if (!r.ok && name) {
+    const old = await installOlderVersion(home, profile, name, flags, label)
+    if (old) r = old
+  }
+
   if (r.ok) {
     if (name) {
       setEnabled(home, profile, name, true)
@@ -1708,6 +1816,17 @@ function gitEnvFor(exe: string): NodeJS.ProcessEnv {
   const binDir = dirname(exe) // …/git/cmd
   const root = join(binDir, '..')
   return { ...GIT_ENV, PATH: `${root}${delimiter}${binDir}${delimiter}${process.env.PATH ?? ''}` }
+}
+
+/**
+ * 为 `dsh plugin add` 的 pnpm→git 子进程准备环境:先确保 git 可用(免装 git 补丁:
+ * 系统 git 缺失时自动下载便携版 MinGit),返回带 PATH 注入的环境。返回 null 表示既没有
+ * 系统 git 便携版也没下载成功 —— 调用方应给出友好错误而不是让 pnpm 报「git not found」。
+ */
+async function ensureGitEnvFor(label: string): Promise<NodeJS.ProcessEnv | null> {
+  const git = await ensureGit(label)
+  if (!git.ok) return null
+  return gitEnvFor(git.exe)
 }
 
 /** Attach a personal access token to an https GitHub clone URL (for private repos). */

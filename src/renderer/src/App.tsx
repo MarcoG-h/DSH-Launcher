@@ -143,6 +143,13 @@ function Shell(): JSX.Element {
     })
   }, [])
 
+  // 窗口拖动时主进程广播:挂起内嵌视图并暂停无限动画,降低拖动期间合成开销。
+  // 根节点加 .window-dragging 类,CSS 里统一 animation-play-state: paused。
+  const [windowDragging, setWindowDragging] = useState(false)
+  useEffect(() => {
+    return api.onWindowDragging(setWindowDragging)
+  }, [])
+
   // Popped-out instances (running in a launcher child window) toggle back to the
   // embedded "integrated" view when their separate window closes — by the button
   // or by clicking the window's own close button. Popping an instance OUT leaves
@@ -176,7 +183,7 @@ function Shell(): JSX.Element {
   const page = view === 'dsh' ? 'dashboard' : (view as PageId)
 
   return (
-    <div className="flex h-full">
+    <div className={`flex h-full${windowDragging ? ' window-dragging' : ''}`}>
       {(config?.splashEnabled ?? true) && !splashDone && <SplashOverlay onDone={() => setSplashDone(true)} />}
       {/* Always mounted (width animates to 0 in orb mode) so the rail's content
           can't pop in/out; overflow-hidden on the rail clips it at width 0. */}

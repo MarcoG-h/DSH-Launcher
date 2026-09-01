@@ -65,6 +65,12 @@
   to { --glow-angle: 360deg; }
 }
 
+/* 窗口拖动中:暂停所有关键帧动画,降低拖动期间的单层合成开销(流光/脉冲等持续动画
+   会被从合成器的活动动画集里移除,不再每帧重画)。拖动是瞬态,结束后即时恢复。 */
+.window-dragging * {
+  animation-play-state: paused !important;
+}
+
 /* 侧边栏安全告警弹窗:呼吸脉冲 */
 @keyframes security-alert-pulse {
   0%, 100% { opacity: 1; }
