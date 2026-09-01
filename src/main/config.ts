@@ -43,6 +43,7 @@ function defaults(): LauncherConfig {
     githubToken: '',
     instances: [],
     activeInstanceId: '',
+    webChats: [{ id: 'default', name: 'DeepSeek 网页版', description: '', url: 'https://chat.deepseek.com', hidden: false }],
     pluginMeta: {}
   }
 }
@@ -130,7 +131,25 @@ export function getConfig(): LauncherConfig {
   if (cache) return cache
   try {
     const raw = readFileSync(file(), 'utf8')
-    const parsed = JSON.parse(raw) as Partial<LauncherConfig>
+    const parsed = JSON.parse(raw) as Partial<LauncherConfig> & {
+      // 旧版单个 webChat 字段(迁移用,类型里已改为数组 webChats)。
+      webChat?: { name?: string; description?: string; url?: string; hidden?: boolean }
+    }
+    // 迁移:旧版单个 webChat → webChats[0]。
+    if (parsed.webChat && !Array.isArray(parsed.webChats)) {
+      parsed.webChats = [{
+        id: 'default',
+        name: parsed.webChat.name || 'DeepSeek 网页版',
+        description: parsed.webChat.description || '',
+        url: parsed.webChat.url || 'https://chat.deepseek.com',
+        hidden: parsed.webChat.hidden === true
+      }]
+    }
+    // 兜底:webChats 字段缺失时(首次运行本版本)补一个默认 DeepSeek 网页版。
+    // 用户手动删空(webChats: [])后不再补——否则删一个又建一个,永远删不完。
+    if (!Array.isArray(parsed.webChats)) {
+      parsed.webChats = [{ id: 'default', name: 'DeepSeek 网页版', description: '', url: 'https://chat.deepseek.com', hidden: false }]
+    }
     cache = reconcileInstances({ ...defaults(), ...parsed })
     // Persist the one-time migration so `instances` is stable on disk.
     if (!Array.isArray(parsed.instances) || parsed.instances.length === 0) {

@@ -1087,6 +1087,25 @@ function killResidualProcesses(dir: string): Promise<void> {
   })
 }
 
+/**
+ * 删除插件目录:每轮先强制释放占用(kill 持有句柄的进程)→ 等句柄释放 → force 删,
+ * 然后验证目录是否真的消失。整体最多 3 轮(初始 + 2 次重试),仍残留返回 false。
+ * 首轮等待窗口最长(多数锁 1-2s 释放),重试轮缩短,避免整体耗时过长「卡住」。
+ */
+async function deletePluginDirWithRetry(dir: string): Promise<boolean> {
+  for (let round = 0; round < 3; round++) {
+    if (!existsSync(dir)) return true
+    await killResidualProcesses(dir)
+    const deleted = await waitUntilDeletable(dir, round === 0 ? 15 : 5, 400)
+    if (!deleted) {
+      try { removeDirForce(dir) } catch { /* 已尽力;下一轮或返回残留 */ }
+    }
+    if (!existsSync(dir)) return true
+    if (round < 2) await delay(700)
+  }
+  return false
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
@@ -1160,21 +1179,23 @@ export async function removeFromLibrary(name: string): Promise<CmdResult> {
   }
 
   if (dirExists) {
-    // 实例已停,但仍可能有残留进程(孤儿 dsh/node 子进程)占用本地库文件导致删除
-    // 失败——先清掉涉及该目录的残留进程(命令行或插件名匹配)。
-    await killResidualProcesses(dir)
-    // 删除前等句柄释放:反复尝试删除(最长约 6s),多数锁释放后直接删干净,不产生
-    // `.deleting-` 残留。仍被占用才走改名兜底。
-    const deleted = await waitUntilDeletable(dir)
-    if (!deleted) {
-      try {
-        removeDirForce(dir)
-      } catch (e) {
-        return { ok: false, code: 1, error: e instanceof Error ? e.message : String(e), affected }
-      }
-    }
+    // 删除前强制释放占用(kill 持有句柄的残留进程)→ 等待句柄释放 → 验证目录真的消失。
+    // 整体最多重试 3 轮(初始 + 2 次);仍失败则返回残留状态,由渲染端弹提示让用户手动
+    // 删除,不无限重试、不卡住。
+    const deleted = await deletePluginDirWithRetry(dir)
     // 兜底:即使走了改名仍留了 `.deleting-`,后台多轮延时清理会在句柄释放后自动清掉。
     void cleanupDeletingResidueSoon()
+    if (!deleted) {
+      return {
+        ok: false,
+        code: 1,
+        error: t(
+          `未能删除插件文件夹: ${dir}\n可能仍被进程占用。请停止相关实例后,手动删除该文件夹。`,
+          `Could not delete plugin folder: ${dir}\nIt may still be locked by a process. Stop the related instance and delete the folder manually.`
+        ),
+        affected
+      }
+    }
   }
   // 插件已从本地库移除(或本就已移除),连同它的显示名/备注一并清掉,
   // 避免「插件删了、名字还留在上面」的残留(此前推荐整合包功能遗留过这个问题)。

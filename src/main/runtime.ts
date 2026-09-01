@@ -71,17 +71,28 @@ export function currentDshVersion(): string | null {
   }
 }
 
-/** 查询 registry 上 @deepseek-ai/dsh 的最新稳定版本;网络失败返回 null(不抛错)。 */
+/**
+ * 查询 registry 上 @deepseek-ai/dsh 的最高版本。之前只查 `latest` dist-tag,
+ * 新版本若发布为预发布(alpha/next/beta 等 tag,如 0.1.2-alpha.3)就检测不到 →
+ * 「dsh 有更新但软件没发现」。改为拉取包元数据(corgi)的 dist-tags,取所有 tag 里
+ * 语义版本最高的。网络失败返回 null(不抛错)。
+ */
 export function latestDshVersion(timeoutMs = 8000): Promise<string | null> {
   return new Promise((resolve) => {
-    const req = httpsGet(`${REGISTRY}/@deepseek-ai/dsh/latest`, { timeout: timeoutMs }, (res) => {
+    const req = httpsGet(`${REGISTRY}/@deepseek-ai/dsh`, {
+      timeout: timeoutMs,
+      headers: { Accept: 'application/vnd.npm.install-v1+json' }
+    }, (res) => {
       let body = ''
       res.setEncoding('utf8')
       res.on('data', (c) => { body += c })
       res.on('end', () => {
         try {
-          const data = JSON.parse(body) as { version?: unknown }
-          resolve(typeof data.version === 'string' && data.version ? data.version : null)
+          const data = JSON.parse(body) as { 'dist-tags'?: Record<string, unknown> }
+          const tags = data['dist-tags'] ?? {}
+          const versions = Object.values(tags).filter((v): v is string => typeof v === 'string' && v.length > 0)
+          const best = versions.slice().sort((a, b) => compareSemver(b, a))[0]
+          resolve(best ?? null)
         } catch {
           resolve(null)
         }
@@ -107,13 +118,50 @@ export async function checkDshUpdate(): Promise<DshUpdateCheck> {
 }
 
 /** 比较语义化版本 a 与 b:返回正数(a>b) / 0 / 负数(a<b)。 */
+/**
+ * 语义化版本比较(正确支持预发布):先比 major/minor/patch,再比预发布。
+ * 旧实现把 '0.1.2-alpha.3' 拆成 [0,1,NaN,3]→[0,1,0,3],和 '0.1.1-rc.2' 前 3 位
+ * 判成相等 → 永远检测不到预发布更新。这里按 semver 规则:无预发布 > 有预发布;
+ * 预发布段数值 < 字母,数值段比大小,字母段比字典序。
+ */
 function compareSemver(a: string, b: string): number {
-  const pa = a.replace(/^v/, '').split('.').map((x) => Number(x) || 0)
-  const pb = b.replace(/^v/, '').split('.').map((x) => Number(x) || 0)
-  for (let i = 0; i < 3; i++) {
-    const x = pa[i] ?? 0
-    const y = pb[i] ?? 0
+  const parse = (v: string): { nums: number[]; pre: string } => {
+    const s = v.replace(/^v/, '')
+    const dash = s.indexOf('-')
+    const core = dash >= 0 ? s.slice(0, dash) : s
+    const pre = dash >= 0 ? s.slice(dash + 1) : ''
+    return { nums: core.split('.').map((x) => Number(x) || 0), pre }
+  }
+  const pa = parse(a)
+  const pb = parse(b)
+  const len = Math.max(pa.nums.length, pb.nums.length)
+  for (let i = 0; i < len; i++) {
+    const x = pa.nums[i] ?? 0
+    const y = pb.nums[i] ?? 0
     if (x !== y) return x - y
+  }
+  if (!pa.pre && !pb.pre) return 0
+  if (!pa.pre) return 1 // 无预发布 > 有预发布
+  if (!pb.pre) return -1
+  const paPre = pa.pre.split('.')
+  const pbPre = pb.pre.split('.')
+  const n = Math.max(paPre.length, pbPre.length)
+  for (let i = 0; i < n; i++) {
+    const x = paPre[i]
+    const y = pbPre[i]
+    if (x === undefined) return -1
+    if (y === undefined) return 1
+    const xn = Number(x)
+    const yn = Number(y)
+    if (Number.isNaN(xn) && Number.isNaN(yn)) {
+      if (x !== y) return x < y ? -1 : 1
+    } else if (Number.isNaN(xn)) {
+      return 1 // 数值段 < 字母段
+    } else if (Number.isNaN(yn)) {
+      return -1
+    } else if (xn !== yn) {
+      return xn - yn
+    }
   }
   return 0
 }
@@ -493,8 +541,9 @@ export async function updateRuntime(): Promise<CmdResult> {
     taskDone(label, 1)
     return { ok: false, code: 1, error: t('运行环境未安装', 'Runtime not installed') }
   }
-  // 实时抓取 npm 最新稳定版(latest 由 pnpm 每次现场解析),不按固定版本号判断。
-  const dshVer = 'latest'
+  // 安装检测到的最高版本(跨 dist-tag,含 alpha/next 等预发布),与 latestDshVersion
+  // 保持一致——否则检测提示有新版本,更新却装回 latest tag,永远「有更新」。
+  const dshVer = (await latestDshVersion()) ?? 'latest'
   const pnpm = join(nodeDir(), 'pnpm.cmd')
   if (!existsSync(pnpm)) {
     taskLine(label, t('[runtime] 未找到 pnpm,请先重新「一键安装运行环境」。', '[runtime] pnpm not found — please re-run "Install runtime" first.'), 'stderr')

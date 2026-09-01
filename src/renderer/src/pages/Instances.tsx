@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+/** 常见厂商对话网址预设(新建链接卡片时可选),按拼音字母排序。 */
+const WEB_CHAT_PRESETS = [
+  { name: 'Claude', url: 'https://claude.ai', py: 'claude' },
+  { name: 'ChatGPT', url: 'https://chatgpt.com', py: 'chatgpt' },
+  { name: 'DeepSeek', url: 'https://chat.deepseek.com', py: 'deepseek' },
+  { name: '豆包', url: 'https://www.doubao.com', py: 'doubao' },
+  { name: 'Grok', url: 'https://grok.com', py: 'grok' },
+  { name: 'Kimi', url: 'https://kimi.moonshot.cn', py: 'kimi' },
+  { name: '腾讯元宝', url: 'https://yuanbao.tencent.com', py: 'tengxun' },
+  { name: '通义千问', url: 'https://tongyi.aliyun.com', py: 'tongyi' },
+  { name: '文心一言', url: 'https://yiyan.baidu.com', py: 'wenxin' },
+  { name: '智谱清言', url: 'https://chatglm.cn', py: 'zhipu' }
+].sort((a, b) => a.py.localeCompare(b.py))
 import type { JSX } from 'react'
-import { api, type DshInstance, type PluginMatrixResult } from '../lib/api'
+import { api, type DshInstance, type PluginMatrixResult, type WebChatConfig } from '../lib/api'
 import { useHarness } from '../hooks/useHarness'
 import { useBackdropClose } from '../hooks/useBackdropClose'
 import { useI18n } from '../i18n'
@@ -826,12 +840,50 @@ function InstanceCard({ inst, onOpen }: { inst: DshInstance; onOpen: () => void 
   )
 }
 
-export function Instances(): JSX.Element {
+export function Instances({ onOpenWebChat }: { onOpenWebChat?: (url: string, popout: boolean) => void }): JSX.Element {
   const { t } = useI18n()
-  const { instances, refresh, tasks } = useHarness()
+  const { instances, refresh, tasks, config, saveConfig } = useHarness()
   const [editing, setEditing] = useState<DshInstance | null>(null)
   const [creating, setCreating] = useState(false)
   const [bundleBusy, setBundleBusy] = useState<string | null>(null)
+  // 网页版免费对话(虚拟实例)列表 + 编辑/新建弹窗。
+  // 注意:不能对空数组回退默认卡——用户删空后应保持为空,否则删一个又出现一个。
+  const webChats: WebChatConfig[] = Array.isArray(config?.webChats) ? config.webChats : []
+  const [editWebChat, setEditWebChat] = useState<WebChatConfig | null>(null)
+  const [creatingWebChat, setCreatingWebChat] = useState(false)
+  const [wcName, setWcName] = useState('')
+  const [wcDesc, setWcDesc] = useState('')
+  const [wcUrl, setWcUrl] = useState('')
+  const [wcHidden, setWcHidden] = useState(false)
+  const openWebChatDetail = (wc: WebChatConfig): void => {
+    setEditWebChat(wc); setWcName(wc.name); setWcDesc(wc.description); setWcUrl(wc.url); setWcHidden(wc.hidden)
+  }
+  const openNewWebChat = (): void => {
+    setEditWebChat(null); setCreatingWebChat(true); setWcName(''); setWcDesc(''); setWcUrl('https://chat.deepseek.com'); setWcHidden(false)
+  }
+  const saveWebChat = async (): Promise<void> => {
+    const name = wcName.trim() || '网页版免费对话'
+    const url = wcUrl.trim() || 'https://chat.deepseek.com'
+    const next: WebChatConfig = {
+      id: editWebChat?.id ?? `web-${Date.now()}`,
+      name, description: wcDesc.trim(), url, hidden: wcHidden
+    }
+    const list = editWebChat
+      ? webChats.map((w) => (w.id === editWebChat.id ? next : w))
+      : [...webChats, next]
+    await saveConfig({ webChats: list })
+    setEditWebChat(null); setCreatingWebChat(false)
+    await refresh()
+  }
+  const removeWebChat = async (id: string): Promise<void> => {
+    await saveConfig({ webChats: webChats.filter((w) => w.id !== id) })
+    setEditWebChat(null)
+    await refresh()
+  }
+  const toggleWebChatHidden = async (id: string, hidden: boolean): Promise<void> => {
+    await saveConfig({ webChats: webChats.map((w) => (w.id === id ? { ...w, hidden } : w)) })
+    await refresh()
+  }
   // 整合包清单:全部由在线库提供(拉取失败回退内置)。
   const [remoteBundles, setRemoteBundles] = useState<RecommendedBundle[] | null>(null)
   const [packConnected, setPackConnected] = useState(false)
@@ -919,17 +971,136 @@ export function Instances(): JSX.Element {
         {instances.map((inst) => (
           <InstanceCard key={inst.id} inst={inst} onOpen={() => setEditing(inst)} />
         ))}
-        {/* 新建实例入口:与实例卡片同尺寸的虚线框(不填充背景),放在网格末尾 */}
-        <button
-          className="h-[104px] p-4 flex select-none cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed transition-colors"
-          style={{ borderColor: 'var(--border-strong)', color: 'var(--muted)', background: 'transparent' }}
-          onClick={() => setCreating(true)}
-          title={t('settings.addInstance')}
-        >
-          <PlusIcon />
-          <span className="text-[13px] font-semibold">{t('settings.addInstance')}</span>
-        </button>
+        {/* 网页版免费对话(虚拟实例)卡片:与实例卡一致——右上「显示」控制侧边栏隐藏,
+            隐藏时打「已隐藏」标签并整体变灰;点卡片打开详情设置 */}
+        {webChats.map((wc) => {
+          const hidden = wc.hidden
+          return (
+            <div
+              key={wc.id}
+              className="h-[104px] p-4 cursor-pointer select-none space-y-2 rounded-xl border transition-opacity"
+              style={{ borderColor: 'var(--border)', background: 'transparent', opacity: hidden ? 0.55 : 1 }}
+              onClick={() => openWebChatDetail(wc)}
+              title={t('webChat.hint')}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="badge-dot shrink-0" style={{ background: 'var(--muted)' }} />
+                  <span className="truncate text-[13px] font-semibold">{wc.name}</span>
+                  {hidden && (
+                    <span className="badge shrink-0" style={{ color: 'var(--muted)', background: 'color-mix(in srgb, var(--muted) 14%, transparent)' }}>
+                      {t('instances.hidden')}
+                    </span>
+                  )}
+                </div>
+                <label
+                  className="flex shrink-0 cursor-pointer items-center gap-1.5"
+                  onClick={(e) => e.stopPropagation()}
+                  title={t('instances.show')}
+                >
+                  <span className="text-[11px]" style={{ color: 'var(--muted)' }}>{t('instances.show')}</span>
+                  <Toggle checked={!hidden} onChange={(v) => void toggleWebChatHidden(wc.id, !v)} />
+                </label>
+              </div>
+              <div className="line-clamp-2 min-h-[30px] break-words text-[11.5px]" style={{ color: 'var(--muted)' }}>
+                {wc.description || t('webChat.hint')}
+              </div>
+            </div>
+          )
+        })}
+
+        {/* 新建实例/链接入口:虚线框;两段各自可点,悬停到哪个哪个亮蓝 */}
+        <div className="h-[104px] p-4 flex items-center justify-center rounded-xl border-2 border-dashed" style={{ borderColor: 'var(--border-strong)', background: 'transparent' }}>
+          <div className="flex items-center gap-1">
+            <button
+              className="flex select-none cursor-pointer items-center gap-2 rounded px-1.5 py-1 transition-colors hover:text-[var(--accent)]"
+              onClick={() => setCreating(true)}
+              title={t('settings.addInstance')}
+            >
+              <PlusIcon />
+              <span className="text-[13px] font-semibold">{t('settings.addInstance')}</span>
+            </button>
+            <span className="text-[13px] font-semibold" style={{ color: 'var(--muted)' }}>/</span>
+            <button
+              className="select-none cursor-pointer rounded px-1.5 py-1 text-[13px] font-semibold transition-colors hover:text-[var(--accent)]"
+              onClick={openNewWebChat}
+              title={t('webChat.newLink')}
+            >
+              {t('webChat.newLink')}
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* 网页版免费对话(虚拟实例)详情/新建:名称 / 介绍 / 地址 / 侧边栏显示;新建含厂商预设 */}
+      {(editWebChat || creatingWebChat) && (
+        <Modal title={creatingWebChat ? t('webChat.newTitle') : t('webChat.settingsTitle')} onClose={() => { setEditWebChat(null); setCreatingWebChat(false) }}>
+          <div className="space-y-3">
+            {creatingWebChat && (
+              <label className="block space-y-1 text-[13px]">
+                <span>{t('webChat.presets')}</span>
+                <select
+                  className="w-full rounded-[8px] border px-2 py-1 text-[12.5px]"
+                  style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)', color: 'var(--text)' }}
+                  value=""
+                  onChange={(e) => {
+                    const p = WEB_CHAT_PRESETS.find((x) => x.url === e.target.value)
+                    if (p) { setWcName(p.name); setWcUrl(p.url) }
+                  }}
+                >
+                  <option value="">{t('webChat.presetPlaceholder')}</option>
+                  {WEB_CHAT_PRESETS.map((p) => (
+                    <option key={p.url} value={p.url}>{p.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label className="block space-y-1 text-[13px]">
+              <span>{t('webChat.nameLabel')}</span>
+              <input
+                className="w-full rounded-[8px] border px-2 py-1 text-[12.5px]"
+                style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)', color: 'var(--text)' }}
+                value={wcName}
+                onChange={(e) => setWcName(e.target.value)}
+              />
+            </label>
+            <label className="block space-y-1 text-[13px]">
+              <span>{t('webChat.descLabel')}</span>
+              <textarea
+                className="w-full rounded-[8px] border px-2 py-1 text-[12.5px] resize-none"
+                style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)', color: 'var(--text)' }}
+                rows={2}
+                value={wcDesc}
+                onChange={(e) => setWcDesc(e.target.value)}
+              />
+            </label>
+            <label className="block space-y-1 text-[13px]">
+              <span>{t('webChat.urlLabel')}</span>
+              <input
+                className="w-full rounded-[8px] border px-2 py-1 text-[12.5px] mono"
+                style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)', color: 'var(--text)' }}
+                value={wcUrl}
+                onChange={(e) => setWcUrl(e.target.value)}
+              />
+            </label>
+            <label className="flex items-center justify-between gap-3 text-[13px] cursor-pointer">
+              <span>{t('webChat.showSidebar')}</span>
+              <Toggle checked={!wcHidden} onChange={(v) => setWcHidden(!v)} />
+            </label>
+            <div className="flex items-center justify-between gap-2 pt-1">
+              {editWebChat ? (
+                <button className="btn btn-ghost btn-sm" style={{ color: 'var(--err)' }} onClick={() => void removeWebChat(editWebChat.id)}>
+                  {t('webChat.delete')}
+                </button>
+              ) : <span />}
+              <div className="flex items-center gap-2">
+                <button className="btn btn-ghost btn-sm" onClick={() => (onOpenWebChat ? onOpenWebChat(wcUrl, false) : void api.setWebChat(true, wcUrl, false))}>{t('webChat.open')}</button>
+                <button className="btn btn-primary btn-sm" onClick={() => void saveWebChat()}>{t('webChat.save')}</button>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Recommended bundles: download a bundle to get a new pre-configured instance. */}
       <div className="border-t pt-4" style={{ borderColor: 'var(--border)' }}>

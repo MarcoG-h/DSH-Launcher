@@ -20,11 +20,18 @@ function ua(): string {
   return 'dsh-launcher/1.0.0 (https://github.com/MarcoG-h/DSH-Launcher)'
 }
 
+/** 配置了 GitHub Token 时返回认证头,否则空对象(匿名请求)。 */
+function authHeaders(): Record<string, string> {
+  const token = getConfig().githubToken
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 async function gh(path: string, accept = 'application/vnd.github+json'): Promise<{ status: number; body: unknown }> {
   const res = await net.fetch(`${API}${path}`, {
     headers: {
       Accept: accept,
-      'User-Agent': ua()
+      'User-Agent': ua(),
+      ...authHeaders()
     }
   })
   const body = await res.json().catch(() => null)
@@ -138,7 +145,8 @@ export async function fetchReadme(owner: string, repo: string): Promise<MarketRe
     res = await net.fetch(`${API}/repos/${encodeURIComponent(o)}/${encodeURIComponent(r)}/readme`, {
       headers: {
         Accept: 'application/vnd.github.raw+json',
-        'User-Agent': ua()
+        'User-Agent': ua(),
+        ...authHeaders()
       }
     })
   } catch {

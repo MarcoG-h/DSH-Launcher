@@ -16,7 +16,7 @@ const SIDEBAR_COLLAPSED = 56
 
 function Shell(): JSX.Element {
   const { state, states, config, activeInstanceId } = useHarness()
-  const [view, setView] = useState<PageId | 'dsh'>('dashboard')
+  const [view, setView] = useState<PageId | 'dsh' | 'web'>('dashboard')
   const [collapsed, setCollapsed] = useState(false)
   // The startup splash plays inside this window; the DSH view (a native child,
   // drawn above the DOM) stays hidden until the splash has finished.
@@ -27,6 +27,9 @@ function Shell(): JSX.Element {
   const status = state?.status ?? 'stopped'
   const ready = status === 'running' || status === 'external'
   const inDsh = view === 'dsh'
+  const inWeb = view === 'web'
+  // 原生视图(DSH 或网页版)占据内容区时,DOM 不渲染页面。
+  const inNative = inDsh || inWeb
   const splashActive = (config?.splashEnabled ?? true) && !splashDone
   const showDsh = ready && inDsh && !splashActive
   const prevReady = useRef<boolean | null>(null)
@@ -70,25 +73,33 @@ function Shell(): JSX.Element {
     }
   }, [ready, inDsh, config?.autoStartOnLaunch])
 
-  // Show/hide the native DSH view for the active instance. On a stopped→ready
-  // transition (or when the active instance changes to one that was booted
-  // since this launcher run) we force a reload so a stale page from a previous
-  // run isn't shown; otherwise that instance's cached view is shown (no
-  // reload — the page keeps whatever the user had open).
+  // 网页版免费对话(虚拟实例)是真正的视图('web',相当于 DSH 界面),不是浮层:
+  // 点开自动缩侧边栏,和其他实例的 DSH 视图行为一致;切走即关闭。
+  // 当前打开的网页链接(可能有多个网页卡片,点哪个开哪个)。
+  const [webChatUrl, setWebChatUrl] = useState(config?.webChats?.[0]?.url || 'https://chat.deepseek.com')
+  // 统一的原生视图管理:网页聊天视图打开时隐藏 DSH 视图;否则恢复 DSH/页面。
+  // 顺序很关键:先隐藏 DSH,再显示网页聊天(共享的 active 状态由最后一次调用定夺)。
   useEffect(() => {
-    if (!activeInstanceId) return
-    api.setDshActive(activeInstanceId, showDsh, showDsh && reloadDsh)
-    if (showDsh && reloadDsh) setReloadDsh(false)
-  }, [showDsh, activeInstanceId, reloadDsh])
+    if (inWeb) {
+      if (activeInstanceId) api.setDshActive(activeInstanceId, false)
+      api.setWebChat(true, webChatUrl, false)
+    } else {
+      api.setWebChat(false, webChatUrl, false)
+      if (activeInstanceId) {
+        api.setDshActive(activeInstanceId, showDsh, showDsh && reloadDsh)
+        if (showDsh && reloadDsh) setReloadDsh(false)
+      }
+    }
+  }, [inWeb, activeInstanceId, showDsh, reloadDsh, webChatUrl])
 
-  // "floatingWhale" (Settings, default off) swaps the collapsed DSH rail for a
-  // draggable orb: the sidebar disappears entirely and the DSH view fills the
-  // window, with the orb floating on top.
+  // "floatingWhale" (Settings, default off) swaps the collapsed rail for a
+  // draggable orb: the sidebar disappears and the native view (DSH 或网页版) fills
+  // the window, with the orb floating on top。网页版视图同样适用。
   const floatingWhale = config?.floatingWhale ?? false
-  const orbMode = floatingWhale && inDsh && collapsed
+  const orbMode = floatingWhale && inNative && collapsed
 
   // Keep the view flush against the sidebar rail when it expands/collapses —
-  // in orb mode the rail is gone, so the DSH view spans the full window.
+  // in orb mode the rail is gone, so the native view spans the full window.
   const dshWidth = orbMode ? 0 : collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED
 
   // The sidebar's width transition is pure CSS; the DSH view is a native child
@@ -112,6 +123,12 @@ function Shell(): JSX.Element {
     raf = requestAnimationFrame(step)
     return () => cancelAnimationFrame(raf)
   }, [dshWidth])
+  // 初始挂载同步侧边栏宽度到主进程(动画 effect 在 from===to 时早退,不发送),
+  // 否则折叠/展开初始态下内嵌视图(DSH/网页聊天)会盖错位置。
+  useEffect(() => {
+    api.setDshSidebarWidth(dshWidth)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Show the floating orb while the DSH view is open in orb mode.
   useEffect(() => {
@@ -164,26 +181,33 @@ function Shell(): JSX.Element {
       {/* Always mounted (width animates to 0 in orb mode) so the rail's content
           can't pop in/out; overflow-hidden on the rail clips it at width 0. */}
       <Sidebar
-        view={inDsh ? 'dsh' : page}
+        view={inNative ? (inDsh ? 'dsh' : 'web') : page}
         setView={(v) => {
-          // Collapse the rail only when actually ENTERING the DSH view from
-          // elsewhere (startup, a nav click, a jump from a non-DSH page).
-          // Switching between two instances keeps the current rail state: the
-          // view is already 'dsh', and re-collapsing on every switch makes the
-          // sidebar useless when hopping between instances.
-          if (v === 'dsh' && v !== view) setCollapsed(true)
+          // 进入原生视图(DSH/网页版)时收侧边栏,但只在「从普通页面进入」时收。
+          // 在原生视图之间切换(网页↔实例、实例↔实例)保持当前侧边栏状态,
+          // 不重复收——和实例间切换的逻辑一致。
+          if ((v === 'dsh' || v === 'web') && !inNative) setCollapsed(true)
           setView(v)
         }}
         collapsed={collapsed}
         setCollapsed={setCollapsed}
         width={dshWidth}
+        onOpenWebChat={(url, popout) => {
+          // 内嵌 = 进入 'web' 视图并记下该网页卡片的链接;弹出 = 独立窗口(不改视图)。
+          if (popout) api.setWebChat(true, url, true)
+          else { setWebChatUrl(url); setView('web') }
+        }}
+        activeWebUrl={webChatUrl}
       />
       <div className="flex-1 flex flex-col min-w-0">
-        <main className={`flex-1 ${inDsh ? 'overflow-hidden' : 'overflow-y-auto'}`}>
-          {inDsh ? null : page === 'dashboard' ? (
+        <main className={`flex-1 ${inNative ? 'overflow-hidden' : 'overflow-y-auto'}`}>
+          {inNative ? null : page === 'dashboard' ? (
             <Dashboard />
           ) : page === 'instances' ? (
-            <Instances />
+            <Instances onOpenWebChat={(url, popout) => {
+              if (popout) api.setWebChat(true, url, true)
+              else { setWebChatUrl(url); setView('web') }
+            }} />
           ) : page === 'plugins' ? (
             <Plugins />
           ) : page === 'security' ? (

@@ -211,51 +211,6 @@ export function Plugins(): JSX.Element {
         />
       ) : (
         <>
-          {/* Install into the active instance */}
-          <div className="panel p-4">
-            <label className="label">
-              {t('plugins.installLabel')} · <span className="mono">{activeName}</span>
-            </label>
-            <div className="flex gap-2">
-              <input
-                className="input"
-                placeholder="https://github.com/owner/dsh-some-plugin"
-                value={spec}
-                onChange={(e) => setSpec(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') doInstall()
-                }}
-              />
-              <button className="btn btn-primary shrink-0" disabled={!spec.trim() || busy.size > 0} onClick={doInstall}>
-                {gh ? <DownloadIcon /> : <PlayIcon />} {gh ? t('plugins.downloadInstall') : t('plugins.install')}
-              </button>
-            </div>
-            {gh ? (
-              <p className="mt-2 text-[12px]" style={{ color: 'var(--accent)' }}>
-                {t('plugins.ghHint.pre')} <span className="mono">{config?.pluginDir}/{gh.repo}</span>{' '}
-                {t('plugins.ghHint.tail', { profile: activeName })}
-              </p>
-            ) : (
-              <p className="mt-2 text-[12px]" style={{ color: 'var(--muted)' }}>
-                {t('plugins.specHint.pre')} <span className="mono">https://github.com/owner/repo</span>
-                {t('plugins.specHint.sep')}
-                <span className="mono">github:owner/repo</span>
-                {t('plugins.specHint.tail')}
-              </p>
-            )}
-            {error && (
-              <div className="mt-2 flex items-start justify-between gap-2 text-[12px]" style={{ color: 'var(--err)' }}>
-                <p className="select-text break-all">{error}</p>
-                <CopyButton text={error} />
-              </div>
-            )}
-            {recentTasks.map((t) => (
-              <div className="mt-3" key={t.label}>
-                <TaskConsole task={t} />
-              </div>
-            ))}
-          </div>
-
           {/* Plugin × instance matrix */}
           <section>
             <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
@@ -448,6 +403,51 @@ export function Plugins(): JSX.Element {
               {t('plugins.matrix.hint')}
             </p>
           </section>
+
+          {/* 安装插件卡片:放在矩阵最下面 */}
+          <div className="panel p-4">
+            <label className="label">
+              {t('plugins.installLabel')} · <span className="mono">{activeName}</span>
+            </label>
+            <div className="flex gap-2">
+              <input
+                className="input"
+                placeholder="https://github.com/owner/dsh-some-plugin"
+                value={spec}
+                onChange={(e) => setSpec(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') doInstall()
+                }}
+              />
+              <button className="btn btn-primary shrink-0" disabled={!spec.trim() || busy.size > 0} onClick={doInstall}>
+                {gh ? <DownloadIcon /> : <PlayIcon />} {gh ? t('plugins.downloadInstall') : t('plugins.install')}
+              </button>
+            </div>
+            {gh ? (
+              <p className="mt-2 text-[12px]" style={{ color: 'var(--accent)' }}>
+                {t('plugins.ghHint.pre')} <span className="mono">{config?.pluginDir}/{gh.repo}</span>{' '}
+                {t('plugins.ghHint.tail', { profile: activeName })}
+              </p>
+            ) : (
+              <p className="mt-2 text-[12px]" style={{ color: 'var(--muted)' }}>
+                {t('plugins.specHint.pre')} <span className="mono">https://github.com/owner/repo</span>
+                {t('plugins.specHint.sep')}
+                <span className="mono">github:owner/repo</span>
+                {t('plugins.specHint.tail')}
+              </p>
+            )}
+            {error && (
+              <div className="mt-2 flex items-start justify-between gap-2 text-[12px]" style={{ color: 'var(--err)' }}>
+                <p className="select-text break-all">{error}</p>
+                <CopyButton text={error} />
+              </div>
+            )}
+            {recentTasks.map((t) => (
+              <div className="mt-3" key={t.label}>
+                <TaskConsole task={t} />
+              </div>
+            ))}
+          </div>
 
           <p className="pt-1 text-[11px]" style={{ color: 'var(--muted)' }}>
             {t('plugins.restartHint')}

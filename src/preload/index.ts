@@ -53,6 +53,7 @@ const api: DshLauncherApi = {
   confirmOpenExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   setDshActive: (instanceId, active, reload) => ipcRenderer.send('dsh:set-active', instanceId, active, reload),
   setDshSidebarWidth: (width) => ipcRenderer.send('dsh:set-sidebar-width', width),
+  setWebChat: (show, url, popout) => ipcRenderer.send('webchat:set', show, url, popout),
   setOrbVisible: (visible) => ipcRenderer.send('orb:set-visible', visible),
   orbDragStart: (ox, oy) => ipcRenderer.send('orb:drag-start', ox, oy),
   orbDragMove: (sx, sy) => ipcRenderer.send('orb:drag-move', sx, sy),

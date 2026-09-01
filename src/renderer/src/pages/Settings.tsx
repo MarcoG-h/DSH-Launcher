@@ -27,7 +27,7 @@ function Field({ label, value, onChange, mono = true, hint }: { label: string; v
 }
 
 export function Settings(): JSX.Element {
-  const { config, saveConfig, tasks, refresh, dshUpdate, states, instances } = useHarness()
+  const { config, saveConfig, tasks, refresh, dshUpdate, launcherUpdate, states, instances } = useHarness()
   const { t, lang } = useI18n()
   const { theme, style, accent, bgImage, toggleTheme, setStyle, setAccent, setBgImage } = useTheme()
   const [bgError, setBgError] = useState<string | null>(null)
@@ -530,6 +530,12 @@ export function Settings(): JSX.Element {
         <img src={proto1Icon} alt="proto1" title="proto1" className="h-4 w-4 rounded-full object-cover" draggable={false} />
         <img src={cedricIcon} alt="credit" title="credit" className="h-4 w-4 rounded-full object-cover" draggable={false} />
       </footer>
+      {/* 版本号 */}
+      <div className="flex items-center justify-center gap-3 pt-1 select-none text-[10.5px]" style={{ color: 'var(--muted)', opacity: 0.55 }}>
+        <span>{t('sidebar.launcherVersion')} v{launcherUpdate?.current ?? '—'}</span>
+        <span>·</span>
+        <span>{t('sidebar.dshVersion')} {dshUpdate?.current ? `v${dshUpdate.current}` : t('sidebar.dshSourceMode')}</span>
+      </div>
     </div>
   )
 }

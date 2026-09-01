@@ -23,6 +23,7 @@ import type {
   PluginSubPackage,
   ProbeStatus,
   SecurityAuditEvent,
+  WebChatConfig,
   SecurityConfig,
   TaskEvent
 } from '../../../shared/types'
@@ -52,6 +53,7 @@ export type {
   PluginSubPackage,
   ProbeStatus,
   SecurityAuditEvent,
+  WebChatConfig,
   SecurityConfig,
   TaskEvent
 }

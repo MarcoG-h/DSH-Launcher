@@ -24,15 +24,19 @@ import {
 import { StatusPill } from './StatusPill'
 import whaleIcon from '../assets/whale.png'
 
-export type PageId = 'dashboard' | 'instances' | 'plugins' | 'security' | 'settings'
+export type PageId = 'dashboard' | 'instances' | 'plugins' | 'security' | 'settings' | 'web'
 
 interface SidebarProps {
-  view: PageId | 'dsh'
-  setView: (v: PageId | 'dsh') => void
+  view: PageId | 'dsh' | 'web'
+  setView: (v: PageId | 'dsh' | 'web') => void
   collapsed: boolean
   setCollapsed: (b: boolean) => void
   /** Current rail width (0 when the floating orb hides it entirely). */
   width: number
+  /** 虚拟实例(网页卡片):url 内嵌进 'web' 视图 / popout=true 弹独立窗口。 */
+  onOpenWebChat: (url: string, popout: boolean) => void
+  /** 当前打开的网页链接(用于高亮侧边栏对应项)。 */
+  activeWebUrl?: string
 }
 
 /** Status dot color per harness status (mirrors StatusPill). */
@@ -49,8 +53,10 @@ const STATUS_PULSE: Record<string, boolean> = {
   stopping: true
 }
 
-export function Sidebar({ view, setView, collapsed, setCollapsed, width }: SidebarProps): JSX.Element {
-  const { state, config, runningTasks, instances, states, activeInstanceId, poppedOut, setActiveInstance, launcherUpdate } = useHarness()
+export function Sidebar({ view, setView, collapsed, setCollapsed, width, onOpenWebChat, activeWebUrl }: SidebarProps): JSX.Element {
+  const { state, config, runningTasks, instances, states, activeInstanceId, poppedOut, setActiveInstance, launcherUpdate, dshUpdate } = useHarness()
+  // 网页版免费对话(虚拟实例)列表:隐藏的不显示。
+  const webChats = (config?.webChats ?? []).filter((w) => !w.hidden)
   // 安全监控:橙色/红色告警时在侧边栏底部弹窗提醒。
   const monitor = useSecurityMonitor()
   const { theme, toggleTheme } = useTheme()
@@ -66,7 +72,12 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
     await setActiveInstance(inst.id)
     const st = states[inst.id]?.status ?? 'stopped'
     if ((st === 'running' || st === 'external') && !poppedOut[inst.id]) {
+      // 运行中的实例:直接切到其 DSH 视图(网页聊天视图随之关闭;原生视图间切换
+      // 不重复收侧边栏,和实例间切换一致)。
       setView('dsh')
+    } else if (view === 'web') {
+      // 网页聊天视图下点了非运行实例:切到实例管理页,关闭网页聊天。
+      setView('instances')
     }
   }
 
@@ -145,7 +156,8 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
             {visible.map((inst) => {
               const st = states[inst.id]?.status ?? 'stopped'
               const pending = states[inst.id]?.pendingRestart === true
-              const isActive = inst.id === activeInstanceId
+              // 网页版视图下只高亮网页版入口,不高亮活动实例(否则两个高亮)。
+              const isActive = inst.id === activeInstanceId && view !== 'web'
               // A pending plugin change turns the dot yellow until the instance
               // is manually restarted (harness clears the flag when running).
               const color = pending ? 'var(--warn)' : (STATUS_COLOR[st] ?? STATUS_COLOR.stopped)
@@ -218,6 +230,45 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width }: Sideb
               )
             })}
           </div>
+          {/* 虚拟实例(网页版免费对话)列表:与正常实例同格式,灰色区分;上方淡虚线分隔。
+              主点击进入 'web' 视图(相当于 DSH 界面,自动缩侧边栏)。 */}
+          {webChats.length > 0 && (
+            <div className="mt-1 pt-1 border-t border-dashed space-y-0.5" style={{ borderColor: 'color-mix(in srgb, var(--border) 55%, transparent)' }}>
+              {webChats.map((wc) => {
+                const active = view === 'web' && activeWebUrl === wc.url
+                return (
+                  <div
+                    key={wc.id}
+                    className="w-full flex items-center gap-1 rounded-lg"
+                    style={{ background: active ? 'var(--accent-soft)' : 'transparent' }}
+                  >
+                    <button
+                      onClick={() => onOpenWebChat(wc.url, false)}
+                      title={wc.name}
+                      className="min-w-0 flex-1 flex items-center gap-2 rounded-lg cursor-pointer select-none"
+                      style={{
+                        justifyContent: collapsed ? 'center' : 'flex-start',
+                        padding: collapsed ? '6px' : '5px 8px',
+                        color: active ? 'var(--accent)' : 'var(--muted)'
+                      }}
+                    >
+                      <span className="badge-dot shrink-0" style={{ background: 'var(--muted)' }} />
+                      {!collapsed && <span className="truncate text-[12px]">{wc.name}</span>}
+                    </button>
+                    {!collapsed && (
+                      <button
+                        className="btn btn-ghost btn-sm !p-1"
+                        title={t('sidebar.webChatPopout')}
+                        onClick={() => onOpenWebChat(wc.url, true)}
+                      >
+                        <NewWindowIcon />
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 

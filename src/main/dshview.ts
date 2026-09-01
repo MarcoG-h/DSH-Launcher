@@ -8,11 +8,16 @@
 // wrong coordinates. A WebContentsView is a first-class child of the window's
 // content view, so keyboard focus and IME work natively.
 
-import { WebContentsView, type BrowserWindow, type WebContents } from 'electron'
+import { BrowserWindow, shell, WebContentsView, type WebContents } from 'electron'
 import { getState } from './harness'
 
 const SIDEBAR_EXPANDED = 212
 const SIDEBAR_COLLAPSED = 56
+
+/** 虚拟实例(DeepSeek 官方网页版对话)的特殊视图 id,不映射到任何真实 harness 实例。 */
+export const WEB_CHAT_ID = '__webchat__'
+/** 官方网页版对话地址(内嵌视图加载它)。 */
+export const WEB_CHAT_URL = 'https://chat.deepseek.com'
 
 const views = new Map<string, WebContentsView>()
 let win: BrowserWindow | null = null
@@ -22,10 +27,26 @@ let sidebarWidth = SIDEBAR_EXPANDED
 const loaded = new Set<string>()
 let onViewAdded: (() => void) | null = null
 
+// 窗口 resize/move 时 Electron 每帧触发,直接对 WebContentsView setBounds 会让
+// 内嵌页面每帧重排,低配电脑明显卡顿。节流:高频事件合并到 ~30ms 一次,并在事件
+// 结束后补一次最终布局(保证松手/停稳后尺寸精确)。离散事件(切实例/侧栏宽)仍立即重排。
+let relayoutTimer: ReturnType<typeof setTimeout> | null = null
+let trailingTimer: ReturnType<typeof setTimeout> | null = null
+// 尺寸 + 活动视图双因子:尺寸未变但活动视图变了(切实例/切网页聊天)也必须重排,
+// 否则 setVisible(true/false) 不会执行 → 网页聊天打不开。
+let lastLayout: { w: number; h: number; x: number; activeId: string | null } | null = null
+
+function scheduleRelayout(): void {
+  if (trailingTimer) clearTimeout(trailingTimer)
+  trailingTimer = setTimeout(() => { trailingTimer = null; relayout() }, 60)
+  if (relayoutTimer) return
+  relayoutTimer = setTimeout(() => { relayoutTimer = null; relayout() }, 30)
+}
+
 /** Attach a host window. The views are created lazily on first activation. */
 export function registerDshView(host: BrowserWindow): void {
   win = host
-  host.on('resize', relayout)
+  host.on('resize', scheduleRelayout)
   host.on('closed', () => {
     for (const v of views.values()) v.webContents.close()
     views.clear()
@@ -99,6 +120,53 @@ export function setDshSidebarWidth(width: number): void {
   relayout()
 }
 
+let webChatUrl = WEB_CHAT_URL
+let webChatWindow: import('electron').BrowserWindow | null = null
+
+function openWebChatWindow(url: string): void {
+  if (webChatWindow && !webChatWindow.isDestroyed()) {
+    webChatWindow.loadURL(url)
+    webChatWindow.focus()
+    return
+  }
+  const w = new BrowserWindow({
+    width: 1000,
+    height: 760,
+    autoHideMenuBar: true,
+    backgroundColor: '#0e1013',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+  })
+  webChatWindow = w
+  w.loadURL(url)
+  // 网页里的外链用系统浏览器打开,不让它替换对话窗口本身。
+  w.webContents.setWindowOpenHandler(({ url: u }) => {
+    if (/^https?:/i.test(u)) void shell.openExternal(u)
+    return { action: 'deny' }
+  })
+  w.on('closed', () => { webChatWindow = null })
+}
+
+/**
+ * 打开 DeepSeek 官方网页版对话:
+ * - popout=true  → 独立 BrowserWindow(和 dsh 弹出窗口同等的独立窗口)。
+ * - popout=false → 应用内嵌 WebContentsView,和 DSH 视图一样贴侧边栏显示;
+ *   关闭时 setWebChat(false) 隐藏。
+ */
+export function setWebChat(show: boolean, url: string, popout: boolean): void {
+  if (popout) {
+    openWebChatWindow(url)
+    return
+  }
+  webChatUrl = url
+  active = show
+  activeId = show ? WEB_CHAT_ID : null
+  if (show && win) {
+    const v = ensureViewFor(WEB_CHAT_ID)
+    if (v) void v.webContents.loadURL(url)
+  }
+  relayout()
+}
+
 /**
  * 移除某实例的嵌入式视图(实例删除时调用)。实例 id 是 UUID 不复用,不清理的话
  * 隐藏视图会一直驻留,白占一个 WebContents。同时避免「删除的实例恰好是活动视图」
@@ -121,6 +189,9 @@ function relayout(): void {
   if (!win) return
   const [w, h] = win.getContentSize()
   const x = sidebarWidth
+  // 尺寸与活动视图都未变才跳过,避免 setBounds 空跑;活动视图变了则必须重排。
+  if (lastLayout && lastLayout.w === w && lastLayout.h === h && lastLayout.x === x && lastLayout.activeId === activeId) return
+  lastLayout = { w, h, x, activeId }
   for (const [id, v] of views) {
     if (active && id === activeId) {
       v.setBounds({ x, y: 0, width: Math.max(0, w - x), height: h })

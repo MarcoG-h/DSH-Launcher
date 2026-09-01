@@ -105,8 +105,19 @@ export interface LauncherConfig {
   pluginMeta?: Record<string, PluginMeta>
   /** 安全设置:dsh-audit 探针开关 / 是否记录原文 / 第三方工具白名单。 */
   security?: { probeEnabled?: boolean; logRawContent?: boolean; thirdPartyTools?: string[] }
+  /** 网页版免费对话(虚拟实例)列表:每个是一条可内嵌打开的链接卡片。 */
+  webChats?: WebChatConfig[]
   /** 上次窗口位置/大小(用于恢复);displayCount 记录当时的显示器数量,变化则不用恢复。 */
   windowBounds?: { x: number; y: number; width: number; height: number; displayCount: number }
+}
+
+/** 网页版免费对话(虚拟实例):名称 / 介绍 / 链接地址 / 是否在侧边栏显示。 */
+export interface WebChatConfig {
+  id: string
+  name: string
+  description: string
+  url: string
+  hidden: boolean
 }
 
 export interface InstalledPlugin {
@@ -500,6 +511,8 @@ export interface DshLauncherApi {
   confirmOpenExternal(url: string): Promise<boolean>
   /** Show/hide the embedded DSH view for an instance; reload when the harness (re)became ready. */
   setDshActive(instanceId: string, active: boolean, reload?: boolean): void
+  /** Web chat (official DeepSeek page): embedded in-app view or pop-out window. */
+  setWebChat(show: boolean, url: string, popout: boolean): void
   /** Sync the sidebar width so the DSH view sits flush against it. */
   setDshSidebarWidth(width: number): void
   /** Show/hide the floating whale orb (used while the DSH view is open with floatingWhale enabled). */
