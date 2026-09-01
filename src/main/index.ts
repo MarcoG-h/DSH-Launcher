@@ -146,6 +146,9 @@ if (!gotTheLock) {
     try {
       plugins.repairAllProfiles()
     } catch { /* 修复失败不阻塞启动 */ }
+    // 立即广播当前 dsh 版本(读本地文件,不依赖网络),否则版本显示会等 checkDshUpdate
+    // 的网络查询(最长 8s 超时)后才更新 → 显示成「源码版」。最新版随后异步补上。
+    broadcast({ type: 'dsh-update', latest: null, current: runtime.currentDshVersion() })
     // 后台检查官方 dsh 是否有新版本(不阻塞启动,网络失败静默)。结果广播给 UI。
     void runtime.checkDshUpdate().then((r) => broadcast({ type: 'dsh-update', latest: r.latest, current: r.current }))
     // 提示式更新:后台检查 DSH-Launcher 自身是否有新版 Release(网络失败静默)。
