@@ -61,7 +61,7 @@ DSH Web 直接内嵌在客户端窗口里。</p>
 
 | 文件 | 说明 | 大小 |
 | --- | --- | --- |
-| [安装版 exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v3.1.0-beta/DSH.Launcher.Setup.3.1.0-beta.exe) | NSIS 安装到系统,自动创建桌面 / 开始菜单快捷方式 | ~100 MB |
+| [标准版 exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v3.1.0-beta/DSH.Launcher.Setup.3.1.0-beta.exe) | NSIS 安装到系统,自动创建桌面 / 开始菜单快捷方式 | ~100 MB |
 | [简单版 exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v2.0.3/DSH.Launcher.Setup.2.0.3.exe) | 不带多实例的极简版本,适合只需单个 DSH 的用户 | ~100 MB |
 | [专业版Launcher](https://github.com/baihejiangnan/deepseek-harness-desktop) | 多实例系统，轻量化，新手不推荐（适配Win/linux/mac） | ~ 20 MB |
 更多版本见 [Releases 页面](https://github.com/MarcoG-h/DSH-Launcher/releases)。
