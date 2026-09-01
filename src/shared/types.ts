@@ -465,6 +465,8 @@ export interface DshLauncherApi {
   uninstallPlugin(instanceId: string, name: string): Promise<CmdResult>
   /** Reinstall/update an installed plugin (git pull + reinstall for `file:` plugins, `dsh plugin up` otherwise). */
   updatePlugin(instanceId: string, name: string): Promise<CmdResult>
+  /** Update a locally-held plugin (by local path): uninstall its repo's plugins from all instances, pull latest from GitHub, reinstall. */
+  updateLocalPlugin(localPath: string): Promise<CmdResult>
   /** Remove a plugin from the local library entirely: delete its source folder and uninstall it from every instance. */
   removeFromLibrary(name: string): Promise<CmdResult>
   /** Remove several plugins from the local library in one go (批量删除本地插件): delete each source folder and uninstall it from every instance. */

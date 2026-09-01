@@ -883,6 +883,94 @@ export async function update(home: string, profile: string, name: string): Promi
   return runAsync(cmd, args, cwd, label, process.platform === 'win32', envPatch)
 }
 
+/** 向上找到含 .git 的仓库根目录(多插件仓库 = 一个目录 + 多个子包)。 */
+function repoRootOf(path: string): string | null {
+  let cur = path
+  for (let i = 0; i < 8; i++) {
+    if (existsSync(join(cur, '.git'))) return cur
+    const parent = dirname(cur)
+    if (parent === cur) break
+    cur = parent
+  }
+  return null
+}
+
+/**
+ * 本地持有插件的「更新」:先给全部实例卸载该插件(释放源码目录占用),再从 GitHub
+ * 拉取最新源码,最后重装回之前装了它的实例。
+ *
+ * 一个 GitHub 仓库常带多个插件(monorepo / 子目录):更新时按「仓库」整体处理——
+ * 找到仓库根(.git),收集仓库内所有插件,一起卸载 → git pull 一次更新全部 → 一起重装。
+ * 进度走 taskLine/taskProgress;GitHub 连不上给出清晰提示。
+ */
+export async function updateLocalPlugin(localPath: string): Promise<CmdResult> {
+  const cfg = getConfig()
+  const label = `update-local:${basename(localPath)}`
+  // 1. 找到仓库根(含 .git)。
+  const repo = repoRootOf(localPath)
+  if (!repo || !existsSync(join(repo, '.git'))) {
+    return { ok: false, code: 1, error: t('未找到该插件的 git 仓库,无法更新', 'No git repo found for this plugin; cannot update') }
+  }
+  // 2. 收集仓库内所有插件:仓库根是插件 → 一个;否则是多个子包。
+  const packages: Array<{ name: string; path: string }> = []
+  if (looksLikeDshPlugin(repo).ok) {
+    const pkg = readJson(join(repo, 'package.json'))
+    if (pkg && typeof pkg.name === 'string') packages.push({ name: pkg.name, path: repo })
+  }
+  for (const sub of findPluginSubpackages(repo)) {
+    packages.push({ name: sub.name, path: join(repo, sub.path) })
+  }
+  if (packages.length === 0) {
+    return { ok: false, code: 1, error: t('仓库里没找到可更新的 dsh 插件', 'No dsh plugins found in this repo') }
+  }
+  taskLine(label, t(`[update] 更新仓库 ${basename(repo)}(含 ${packages.length} 个插件)…`, `[update] Updating repo ${basename(repo)} (${packages.length} plugin(s))…`))
+  // 3. 卸载全部实例中的所有相关插件(先停用再移除)。
+  taskProgress(label, 0.1, t('卸载实例中的插件…', 'Uninstalling from instances…'))
+  const affectedByPkg = new Map<string, string[]>()
+  for (const pkg of packages) {
+    const ids: string[] = []
+    for (const inst of cfg.instances) {
+      const home = instanceDshHome(inst)
+      const { installed } = listInstalled(home, inst.profile)
+      if (!installed.some((x) => x.name === pkg.name)) continue
+      setEnabled(home, inst.profile, pkg.name, false)
+      await remove(home, inst.profile, pkg.name)
+      ids.push(inst.id)
+    }
+    if (ids.length) affectedByPkg.set(pkg.name, ids)
+  }
+  // 4. git pull(GitHub 连不上给清晰提示)。
+  taskProgress(label, 0.4, t('从 GitHub 拉取最新…', 'Pulling latest from GitHub…'))
+  const git = await ensureGit(label)
+  if (!git.ok) { taskDone(label, 1); return { ok: false, code: 1, error: git.error } }
+  const pull = await runAsync(git.exe, ['-C', repo, 'pull', '--ff-only'], process.cwd(), label, false, gitEnvFor(git.exe), GIT_TIMEOUT_MS)
+  if (!pull.ok) {
+    taskDone(label, pull.code ?? 1)
+    const stderr = pull.stderr ?? ''
+    const friendly = /could not resolve|failed to connect|unable to access|not authorized|fatal:/i.test(stderr)
+      ? t(`无法连接 GitHub 仓库(网络或权限问题):${stderr.split('\n')[0]}`, `Cannot reach the GitHub repo (network or auth): ${stderr.split('\n')[0]}`)
+      : (pull.error ?? t('拉取失败', 'Pull failed'))
+    taskLine(label, `[update] ${friendly}`, 'stderr')
+    return { ok: false, code: pull.code ?? 1, error: friendly }
+  }
+  // 5. 重装回之前装了它们的实例(仓库内所有插件一起)。
+  taskProgress(label, 0.8, t('重新安装到实例…', 'Reinstalling to instances…'))
+  const affected = new Set<string>()
+  for (const pkg of packages) {
+    for (const id of affectedByPkg.get(pkg.name) ?? []) {
+      const inst = cfg.instances.find((x) => x.id === id)
+      if (!inst) continue
+      const home = instanceDshHome(inst)
+      await install(home, inst.profile, pkg.path, pkg.name)
+      affected.add(id)
+    }
+  }
+  taskProgress(label, 1, t('更新完成', 'Update complete'))
+  taskLine(label, t(`[update] ✔ 更新完成: ${basename(repo)}`, `[update] ✔ Done: ${basename(repo)}`))
+  taskDone(label, 0)
+  return { ok: true, code: 0, affected: [...affected] }
+}
+
 /**
  * Toggle a plugin's activation in a profile WITHOUT touching the installed
  * dependency. Two channels, matching the harness's profile contract: a package

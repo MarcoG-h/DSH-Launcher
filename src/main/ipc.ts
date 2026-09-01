@@ -168,6 +168,8 @@ export function registerIpc(): void {
     markPendingRestart(String(instanceId), r.ok)
     return r
   })
+  // 本地持有插件的更新(按仓库):卸载全部实例 + GitHub 拉最新 + 重装。
+  ipcMain.handle('plugins:updateLocal', async (_e, localPath: string) => plugins.updateLocalPlugin(String(localPath)))
   ipcMain.handle('plugins:removeFromLibrary', async (_e, name: string) => {
     // 先停运行中的实例,避免本地库文件被进程占用导致删除失败(移除会重建依赖)。
     for (const inst of instances.getInstances()) {

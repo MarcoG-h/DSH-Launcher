@@ -468,6 +468,11 @@ export function Plugins(): JSX.Element {
             void loadMatrix()
             void loadList()
           }}
+          onUpdated={() => {
+            setDetail(null)
+            void loadMatrix()
+            void loadList()
+          }}
         />
       )}
     </div>
@@ -629,18 +634,24 @@ function PluginDetailModal({
   row,
   onClose,
   onSaved,
-  onRemoved
+  onRemoved,
+  onUpdated
 }: {
   row: PluginMatrixRow
   onClose: () => void
   onSaved: () => void
   onRemoved: () => void
+  onUpdated: () => void
 }): JSX.Element {
   const { t } = useI18n()
+  const { tasks } = useHarness()
+  // 更新任务进度(主进程 taskLine/taskProgress 广播的 `update-local:<basename>` 任务)。
+  const updateTask = tasks[`update-local:${row.path.split(/[\\/]/).pop() ?? ''}`]
   const [displayName, setDisplayName] = useState(row.displayName === row.name ? '' : row.displayName)
   const [remark, setRemark] = useState(row.remark ?? '')
   const [saving, setSaving] = useState(false)
   const [removing, setRemoving] = useState(false)
+  const [updating, setUpdating] = useState(false)
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -669,6 +680,24 @@ function PluginDetailModal({
       setErr(e instanceof Error ? e.message : String(e))
     } finally {
       setRemoving(false)
+    }
+  }
+
+  const updateLocal = async (): Promise<void> => {
+    if (!await api.confirm(t('plugins.updateLocalConfirm', { name: row.displayName }))) return
+    setUpdating(true)
+    setErr(null)
+    try {
+      const r = await api.updateLocalPlugin(row.path)
+      if (!r.ok) {
+        setErr(r.error ?? t('plugins.updateLocalFailed'))
+        return
+      }
+      onUpdated()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setUpdating(false)
     }
   }
 
@@ -765,10 +794,20 @@ function PluginDetailModal({
           </div>
         )}
 
+        {updateTask && <div className="mt-3"><TaskConsole task={updateTask} /></div>}
+
         <div className="flex items-center justify-between gap-2 mt-4">
-          <button className="btn btn-danger" disabled={removing} onClick={() => void removeFromLibrary()}>
-            {row.path === '' ? t('plugins.uninstallAll') : t('plugins.removeFromLibrary')}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* 本地持有插件可更新:卸载全部实例 + 从 GitHub 拉取最新 */}
+            {row.path !== '' && (
+              <button className="btn btn-ghost" disabled={updating} onClick={() => void updateLocal()}>
+                <RefreshIcon /> {updating ? t('plugins.updatingLocal') : t('plugins.updateLocal')}
+              </button>
+            )}
+            <button className="btn btn-danger" disabled={removing} onClick={() => void removeFromLibrary()}>
+              {row.path === '' ? t('plugins.uninstallAll') : t('plugins.removeFromLibrary')}
+            </button>
+          </div>
           <div className="flex items-center gap-2">
             {saved && (
               <span className="text-[12px]" style={{ color: 'var(--ok)' }}>

@@ -36,6 +36,7 @@ const api: DshLauncherApi = {
   enablePlugin: (instanceId, name) => ipcRenderer.invoke('plugins:enable', instanceId, name),
   uninstallPlugin: (instanceId, name) => ipcRenderer.invoke('plugins:uninstall', instanceId, name),
   updatePlugin: (instanceId, name) => ipcRenderer.invoke('plugins:update', instanceId, name),
+  updateLocalPlugin: (name) => ipcRenderer.invoke('plugins:updateLocal', name),
   removeFromLibrary: (name) => ipcRenderer.invoke('plugins:removeFromLibrary', name),
   removeFromLibraryMany: (names) => ipcRenderer.invoke('plugins:removeFromLibraryMany', names),
   repairDeps: () => ipcRenderer.invoke('build:repair'),
