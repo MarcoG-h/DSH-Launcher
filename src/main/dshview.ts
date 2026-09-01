@@ -9,7 +9,7 @@
 // content view, so keyboard focus and IME work natively.
 
 import { BrowserWindow, shell, WebContentsView, type WebContents } from 'electron'
-import { getState } from './harness'
+import { consumeInstanceAuthUrl, getInstanceAuthUrl, getState, onInstanceAuthUrl } from './harness'
 
 const SIDEBAR_EXPANDED = 212
 const SIDEBAR_COLLAPSED = 56
@@ -47,6 +47,16 @@ function scheduleRelayout(): void {
 export function registerDshView(host: BrowserWindow): void {
   win = host
   host.on('resize', scheduleRelayout)
+  // 新版 dsh 认证 token 到达时,若该实例是活动视图,用带 token 的 URL 重载
+  // (否则内嵌视图加载的是基础 URL,会 401「authentication required」)。
+  onInstanceAuthUrl((id, url) => {
+    if (active && id === activeId && win) {
+      const v = views.get(id)
+      if (v) {
+        void v.webContents.loadURL(url).then(() => consumeInstanceAuthUrl(id)).catch(() => {})
+      }
+    }
+  })
   host.on('closed', () => {
     for (const v of views.values()) v.webContents.close()
     views.clear()
@@ -79,7 +89,13 @@ export function setDshActive(instanceId: string, next: boolean, reload?: boolean
       if (!loaded.has(instanceId) || reload) {
         loaded.add(instanceId)
         const port = getState(instanceId).port
-        if (port > 0) void v.webContents.loadURL(`http://127.0.0.1:${port}`)
+        // 新版 dsh 认证:优先加载带 launchToken 的认证 URL(主进程持有),否则回退基础 URL。
+        // token 用后即毁:加载成功(种 cookie)后销毁;全部退出时 dsh 必停,下次新 token。
+        const authUrl = getInstanceAuthUrl(instanceId)
+        if (port > 0) {
+          const p = v.webContents.loadURL(authUrl ?? `http://127.0.0.1:${port}`)
+          if (authUrl) void p.then(() => consumeInstanceAuthUrl(instanceId)).catch(() => { /* 失败保留 */ })
+        }
       }
     }
   } else {
@@ -173,6 +189,8 @@ export function setWebChat(show: boolean, url: string, popout: boolean): void {
  * 时残留的 activeId 指向已删除实例。
  */
 export function removeDshView(instanceId: string): void {
+  // 实例删除时一并清理认证 token。
+  consumeInstanceAuthUrl(instanceId)
   const v = views.get(instanceId)
   if (!v) return
   if (activeId === instanceId) {

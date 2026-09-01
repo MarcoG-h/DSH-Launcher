@@ -137,10 +137,45 @@ function patch(rt: Runtime, p: Partial<HarnessState>): void {
   broadcast({ type: 'state', state: getState(rt.instanceId) })
 }
 
+// 每个实例的 dsh web 认证 URL(带 launchToken)。安全:只留在主进程,不广播给渲染层;
+// 日志显示时会把 token 抹掉。
+const authUrls = new Map<string, string>()
+let onAuthUrlCb: ((id: string, url: string) => void) | null = null
+
+/** 注册 dsh web 认证 URL 变化回调(供 dshview 在活动实例拿到新 token 时重载视图)。 */
+export function onInstanceAuthUrl(cb: (id: string, url: string) => void): void {
+  onAuthUrlCb = cb
+}
+
+/** 主进程持有的实例认证 URL(带 launchToken);渲染层拿不到。 */
+export function getInstanceAuthUrl(id: string): string | undefined {
+  return authUrls.get(id)
+}
+
+/** 取走并销毁实例的认证 URL。安全:全部退出时 dsh 必停,下次启动是新 token,销毁无风险。 */
+export function consumeInstanceAuthUrl(id: string): string | undefined {
+  const url = authUrls.get(id)
+  authUrls.delete(id)
+  return url
+}
+
+
 function pushLine(rt: Runtime, stream: 'stdout' | 'stderr', raw: string): void {
-  const line = raw.replace(ANSI, '')
+  let line = raw.replace(ANSI, '')
   if (!line) return
   const at = Date.now()
+  // 新版 dsh 的认证:捕获 `dsh web: http://…?launchToken=…` 里的完整 URL(主进程用),
+  // 并在日志里把 token 抹掉,避免渲染层日志控制台泄露 token。
+  if (stream === 'stdout') {
+    const m = line.match(/dsh web:\s*(\S+)/)
+    if (m && /launchToken=/.test(m[1])) {
+      authUrls.set(rt.instanceId, m[1])
+      onAuthUrlCb?.(rt.instanceId, m[1])
+    }
+    if (line.includes('launchToken=')) {
+      line = line.replace(/launchToken=[^&\s"']+/g, 'launchToken=***')
+    }
+  }
   rt.lastOutputAt = at
   rt.log.push({ stream, line, at })
   if (rt.log.length > MAX_LOG) rt.log.splice(0, rt.log.length - MAX_LOG)
@@ -158,7 +193,8 @@ function pushLine(rt: Runtime, stream: 'stdout' | 'stderr', raw: string): void {
 
 /** Match `http(s)://host:port` / `ws(s)://host:port` and return the port. */
 function parsePortFromLine(line: string): number | null {
-  const m = line.match(/(?:https?|wss?):\/\/(?:\[[^\]]*\]|[^\s/:]+)(?::(\d+))?(?:\/|$|\s)/i)
+  // 端口后允许 `/`、`?`(新版 dsh 的 URL 带 `?launchToken=…`)、`#`、空格或行尾。
+  const m = line.match(/(?:https?|wss?):\/\/(?:\[[^\]]*\]|[^\s/:]+)(?::(\d+))?(?:[/?#]|$|\s)/i)
   if (m && m[1]) return Number(m[1])
   return null
 }
@@ -403,6 +439,8 @@ async function startInstanceInner(inst: DshInstance, rt: Runtime): Promise<{ ok:
       }
     }
     pushLine(rt, 'stderr', t(`[launcher] 进程退出 code=${code ?? 'null'} signal=${signal ?? 'none'}`, `[launcher] Process exited code=${code ?? 'null'} signal=${signal ?? 'none'}`))
+    // 进程退出即清掉认证 token:避免重启后、新 token 到达前用到旧(死进程)token。
+    authUrls.delete(rt.instanceId)
     rt.child = null
     stopPortProbe(rt)
     clearStartTimer(rt)

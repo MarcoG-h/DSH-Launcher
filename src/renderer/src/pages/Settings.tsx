@@ -479,16 +479,7 @@ export function Settings(): JSX.Element {
               <Field label={t('settings.buildCmd')} value={form.buildCmd ?? ''} onChange={set('buildCmd')} />
               <Field label={t('settings.pnpm')} value={form.pnpm ?? ''} onChange={set('pnpm')} />
             </div>
-            <div className="flex flex-wrap gap-6 pt-1">
-              <label className="flex items-center gap-2 text-[13px] cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form.stopOnQuit ?? true}
-                  onChange={(e) => set('stopOnQuit')(e.target.checked)}
-                />
-                {t('settings.stopOnQuit')}
-              </label>
-            </div>
+            {/* 关闭应用时必停 Harness(保证下次启动是新 token,认证 token 可安全销毁)。 */}
             <div className="grid sm:grid-cols-2 gap-4">
               <div>
                 <label className="label">{t('settings.startupTimeout')}</label>

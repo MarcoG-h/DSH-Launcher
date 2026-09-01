@@ -175,6 +175,8 @@ if (!gotTheLock) {
 
   app.on('before-quit', () => {
     markQuitting()
-    if (getConfig().stopOnQuit) stopAllSync()
+    // 关闭应用必停所有 Harness(去掉可配置开关):保证下次启动 dsh 是新进程、新认证
+    // token,使内嵌视图的认证 token 可以安全「用后即毁」。
+    stopAllSync()
   })
 }
