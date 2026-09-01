@@ -168,13 +168,13 @@ function pushLine(rt: Runtime, stream: 'stdout' | 'stderr', raw: string): void {
   // 并在日志里把 token 抹掉,避免渲染层日志控制台泄露 token。
   if (stream === 'stdout') {
     const m = line.match(/dsh web:\s*(\S+)/)
-    if (m && /launchToken=/.test(m[1])) {
+    // 新版 dsh 认证 URL 的 token 查询参数名是 `token`(兼容旧 `launchToken`)。
+    if (m && /[?&](?:token|launchToken)=/.test(m[1])) {
       authUrls.set(rt.instanceId, m[1])
       onAuthUrlCb?.(rt.instanceId, m[1])
     }
-    if (line.includes('launchToken=')) {
-      line = line.replace(/launchToken=[^&\s"']+/g, 'launchToken=***')
-    }
+    // 日志脱敏:URL 查询参数里的 token / launchToken 值都抹掉,渲染层不可见。
+    line = line.replace(/([?&](?:token|launchToken)=)[^&\s"']+/g, '$1***')
   }
   rt.lastOutputAt = at
   rt.log.push({ stream, line, at })
