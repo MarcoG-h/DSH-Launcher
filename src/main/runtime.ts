@@ -563,6 +563,16 @@ export async function updateRuntime(): Promise<CmdResult> {
     const r = await runAsync(pnpm, ['add', `@deepseek-ai/dsh@${dshVer}`, `--registry=${REGISTRY}`, '--config.strictDepBuilds=false'], dshInstallDir(), label, process.platform === 'win32')
     if (!r.ok) {
       taskDone(label, r.code ?? 1)
+      // 常见:官方发布新版 dsh 时依赖(如 dsh-native-command)还没同步发布,导致
+      // pnpm NO_MATCHING_VERSION。给出清晰提示,替代晦涩的 pnpm 报错,可稍后重试。
+      if (/NO_MATCHING_VERSION|No matching version/i.test(r.stderr ?? '')) {
+        const friendly = t(
+          `新版 dsh(${dshVer})的某个依赖尚未发布完整(官方发布顺序错位)。请稍后重试,或先保持当前版本。`,
+          `The new dsh (${dshVer}) has a dependency that isn't fully published yet (official release ordering). Retry later, or keep the current version.`
+        )
+        taskLine(label, `[runtime] ${friendly}`, 'stderr')
+        return { ok: false, code: r.code ?? 1, error: friendly }
+      }
       return r
     }
     taskLine(label, t('[runtime] ✔ 内置 dsh 已升级', '[runtime] ✔ Built-in dsh upgraded'))
