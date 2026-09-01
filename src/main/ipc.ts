@@ -10,8 +10,8 @@ import * as instances from './instances'
 import * as orb from './orb'
 import * as market from './market'
 import * as plugins from './plugins'
-import * as popup from './popup'
 import * as runtime from './runtime'
+import * as popup from './popup'
 import * as security from './security'
 import { registerEmbeddedView } from './webview'
 import type { DshInstance, MarketSourceId, NewInstanceInput, PluginMeta } from '../shared/types'
@@ -27,7 +27,9 @@ export function registerIpc(): void {
   ipcMain.handle('state:get', () => ({
     states: harness.getAllStates(),
     logs: harness.getAllLogs(),
-    config: getConfig()
+    config: getConfig(),
+    // 当前 dsh 版本(内置运行时;源码模式为 null,渲染层据此显示版本或「源码版」)。
+    dshVersion: runtime.currentDshVersion()
   }))
 
   ipcMain.handle('logs:clear', () => {

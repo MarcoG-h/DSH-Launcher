@@ -214,6 +214,8 @@ export interface BootstrapState {
   /** log per instance id. */
   logs: Record<string, LogLine[]>
   config: LauncherConfig
+  /** 当前 dsh 版本(内置运行时);源码模式为 null。 */
+  dshVersion: string | null
 }
 
 export interface CmdResult {

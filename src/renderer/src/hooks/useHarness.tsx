@@ -80,6 +80,8 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
       setStates(boot.states)
       setLogs(boot.logs)
       applyConfig(boot.config)
+      // 挂载/刷新即取 dsh 版本,不等 dsh-update 广播(广播可能早于渲染层订阅而丢失)。
+      setDshUpdate((prev) => ({ ...(prev ?? { latest: null, update: false }), current: boot.dshVersion ?? null }))
     } catch {
       /* ignore */
     }

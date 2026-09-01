@@ -62,13 +62,26 @@ export function runtimeMissingPart(): 'node' | 'dsh' | null {
 
 /** 当前内置 @deepseek-ai/dsh 的版本;未安装内置运行环境时返回 null。 */
 export function currentDshVersion(): string | null {
+  // 内置运行时:读 <runtimeRoot>/dsh/node_modules/@deepseek-ai/dsh 的版本。
   try {
     const p = join(dshInstallDir(), 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
-    if (!existsSync(p)) return null
-    return String((JSON.parse(readFileSync(p, 'utf8')) as { version?: unknown }).version ?? '')
-  } catch {
-    return null
-  }
+    if (existsSync(p)) {
+      const v = (JSON.parse(readFileSync(p, 'utf8')) as { version?: unknown }).version
+      if (typeof v === 'string' && v) return v
+    }
+  } catch { /* 忽略 */ }
+  // 源码模式:读 harness 仓库 CLI 的版本(源码 dsh 的版本)。
+  try {
+    const repo = getConfig().harnessRepo
+    if (repo) {
+      const p = join(repo, 'apps', 'cli', 'package.json')
+      if (existsSync(p)) {
+        const v = (JSON.parse(readFileSync(p, 'utf8')) as { version?: unknown }).version
+        if (typeof v === 'string' && v) return v
+      }
+    }
+  } catch { /* 忽略 */ }
+  return null
 }
 
 /**
