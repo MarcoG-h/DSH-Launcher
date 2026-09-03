@@ -74,23 +74,42 @@ function Shell(): JSX.Element {
   }, [ready, inDsh, config?.autoStartOnLaunch])
 
   // 网页版免费对话(虚拟实例)是真正的视图('web',相当于 DSH 界面),不是浮层:
-  // 点开自动缩侧边栏,和其他实例的 DSH 视图行为一致;切走即关闭。
-  // 当前打开的网页链接(可能有多个网页卡片,点哪个开哪个)。
-  const [webChatUrl, setWebChatUrl] = useState(config?.webChats?.[0]?.url || 'https://chat.deepseek.com')
+  // 点开自动缩侧边栏,和其他实例的 DSH 视图行为一致。每张卡在 main 侧有独立常驻视图,
+  // 切走/离开再回来不重载(对话保留);双击侧栏卡 = 刷新(F5,带一次 forceReload)。
+  const [webChatId, setWebChatId] = useState<string | null>(null)
+  const [webReloadTick, setWebReloadTick] = useState(0)
+  const webChat = (config?.webChats ?? []).find((w) => w.id === webChatId) ?? null
+
+  // 打开一张网页卡:内嵌 = 切到该卡视图(不重载);popout = 独立窗口(不改视图)。
+  const openWebChat = (wc: { id: string; url: string }, popout: boolean): void => {
+    if (popout) api.setWebChat(true, wc.id, wc.url, true)
+    else { setWebChatId(wc.id); setView('web') }
+  }
+  // 双击侧栏网页卡:先切到该卡(若未在),再让它刷新一次(相当于 F5)。普通单击仍只切换不重载。
+  const refreshWebChat = (wc: { id: string; url: string }): void => {
+    setWebChatId(wc.id)
+    setView('web')
+    setWebReloadTick((t) => t + 1)
+  }
   // 统一的原生视图管理:网页聊天视图打开时隐藏 DSH 视图;否则恢复 DSH/页面。
   // 顺序很关键:先隐藏 DSH,再显示网页聊天(共享的 active 状态由最后一次调用定夺)。
+  // forceReload 是一次性的:双击侧栏卡触发,消费后立刻清零,普通进出不重载。
   useEffect(() => {
     if (inWeb) {
+      // 当前卡已被删(配置里找不到)→ 退出网页视图,别让空卡占着。
+      if (!webChat) { setView('dashboard'); return }
       if (activeInstanceId) api.setDshActive(activeInstanceId, false)
-      api.setWebChat(true, webChatUrl, false)
+      const force = webReloadTick > 0
+      if (force) setWebReloadTick(0)
+      api.setWebChat(true, webChat.id, webChat.url, false, force)
     } else {
-      api.setWebChat(false, webChatUrl, false)
+      if (webChat) api.setWebChat(false, webChat.id, webChat.url, false)
       if (activeInstanceId) {
         api.setDshActive(activeInstanceId, showDsh, showDsh && reloadDsh)
         if (showDsh && reloadDsh) setReloadDsh(false)
       }
     }
-  }, [inWeb, activeInstanceId, showDsh, reloadDsh, webChatUrl])
+  }, [inWeb, activeInstanceId, showDsh, reloadDsh, webChat, webReloadTick])
 
   // "floatingWhale" (Settings, default off) swaps the collapsed rail for a
   // draggable orb: the sidebar disappears and the native view (DSH 或网页版) fills
@@ -171,22 +190,16 @@ function Shell(): JSX.Element {
         collapsed={collapsed}
         setCollapsed={setCollapsed}
         width={dshWidth}
-        onOpenWebChat={(url, popout) => {
-          // 内嵌 = 进入 'web' 视图并记下该网页卡片的链接;弹出 = 独立窗口(不改视图)。
-          if (popout) api.setWebChat(true, url, true)
-          else { setWebChatUrl(url); setView('web') }
-        }}
-        activeWebUrl={webChatUrl}
+        onOpenWebChat={openWebChat}
+        onRefreshWebChat={refreshWebChat}
+        activeWebChatId={webChatId}
       />
       <div className="flex-1 flex flex-col min-w-0">
         <main className={`flex-1 ${inNative ? 'overflow-hidden' : 'overflow-y-auto'}`}>
           {inNative ? null : page === 'dashboard' ? (
             <Dashboard />
           ) : page === 'instances' ? (
-            <Instances onOpenWebChat={(url, popout) => {
-              if (popout) api.setWebChat(true, url, true)
-              else { setWebChatUrl(url); setView('web') }
-            }} />
+            <Instances onOpenWebChat={openWebChat} />
           ) : page === 'plugins' ? (
             <Plugins />
           ) : page === 'security' ? (

@@ -203,6 +203,8 @@ export type LauncherEvent =
   | { type: 'task'; task: TaskEvent }
   | { type: 'instances'; instances: DshInstance[]; activeInstanceId: string }
   | { type: 'popup'; instanceId: string; open: boolean }
+  /** 保活中的网页卡 id(常驻视图还在);侧栏据此点亮/熄灭卡片状态点。 */
+  | { type: 'webchat-views'; ids: string[] }
   | { type: 'dsh-update'; latest: string | null; current: string | null }
   | { type: 'launcher-update'; latest: string | null; current: string; url: string | null; update: boolean }
   | { type: 'logs-cleared' }
@@ -515,8 +517,12 @@ export interface DshLauncherApi {
   confirmOpenExternal(url: string): Promise<boolean>
   /** Show/hide the embedded DSH view for an instance; reload when the harness (re)became ready. */
   setDshActive(instanceId: string, active: boolean, reload?: boolean): void
-  /** Web chat (official DeepSeek page): embedded in-app view or pop-out window. */
-  setWebChat(show: boolean, url: string, popout: boolean): void
+  /** Web chat (虚拟实例) cards: popout → separate window; embedded keeps one live view per card (`chatId`) so switching cards / leaving and returning never reloads. `forceReload` (double-click refresh / F5) reloads it. */
+  setWebChat(show: boolean, chatId: string, url: string, popout: boolean, forceReload?: boolean): void
+  /** Release a web-chat card's persistent embedded view immediately (e.g. the card was removed). */
+  releaseWebChat(chatId: string): void
+  /** Ids of web-chat cards whose embedded view is currently kept alive (polled once at mount). */
+  getWebChatAlive(): Promise<string[]>
   /** Sync the sidebar width so the DSH view sits flush against it. */
   setDshSidebarWidth(width: number): void
   /** Show/hide the floating whale orb (used while the DSH view is open with floatingWhale enabled). */

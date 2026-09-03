@@ -33,10 +33,12 @@ interface SidebarProps {
   setCollapsed: (b: boolean) => void
   /** Current rail width (0 when the floating orb hides it entirely). */
   width: number
-  /** 虚拟实例(网页卡片):url 内嵌进 'web' 视图 / popout=true 弹独立窗口。 */
-  onOpenWebChat: (url: string, popout: boolean) => void
-  /** 当前打开的网页链接(用于高亮侧边栏对应项)。 */
-  activeWebUrl?: string
+  /** 虚拟实例(网页卡片):内嵌进 'web' 视图(切换不重载)/ popout=true 弹独立窗口。 */
+  onOpenWebChat: (chat: { id: string; url: string }, popout: boolean) => void
+  /** 虚拟实例卡双击:刷新该卡页面(相当于 F5,由 App 切到该卡并触发一次 forceReload)。 */
+  onRefreshWebChat: (chat: { id: string; url: string }) => void
+  /** 当前打开的网页卡 id(用于高亮侧边栏对应项)。 */
+  activeWebChatId?: string | null
 }
 
 /** Status dot color per harness status (mirrors StatusPill). */
@@ -53,8 +55,8 @@ const STATUS_PULSE: Record<string, boolean> = {
   stopping: true
 }
 
-export function Sidebar({ view, setView, collapsed, setCollapsed, width, onOpenWebChat, activeWebUrl }: SidebarProps): JSX.Element {
-  const { state, config, runningTasks, instances, states, activeInstanceId, poppedOut, setActiveInstance, launcherUpdate, dshUpdate } = useHarness()
+export function Sidebar({ view, setView, collapsed, setCollapsed, width, onOpenWebChat, onRefreshWebChat, activeWebChatId }: SidebarProps): JSX.Element {
+  const { state, config, runningTasks, instances, states, activeInstanceId, poppedOut, setActiveInstance, launcherUpdate, dshUpdate, webViewAlive } = useHarness()
   // 网页版免费对话(虚拟实例)列表:隐藏的不显示。
   const webChats = (config?.webChats ?? []).filter((w) => !w.hidden)
   // 安全监控:橙色/红色告警时在侧边栏底部弹窗提醒。
@@ -235,7 +237,9 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width, onOpenW
           {webChats.length > 0 && (
             <div className="mt-1 pt-1 border-t border-dashed space-y-0.5" style={{ borderColor: 'color-mix(in srgb, var(--border) 55%, transparent)' }}>
               {webChats.map((wc) => {
-                const active = view === 'web' && activeWebUrl === wc.url
+                const active = view === 'web' && activeWebChatId === wc.id
+                // 保活中(常驻视图还在,页面没被释放)= 绿点;未打开/已释放 = 灰点。
+                const alive = webViewAlive.includes(wc.id)
                 return (
                   <div
                     key={wc.id}
@@ -243,8 +247,9 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width, onOpenW
                     style={{ background: active ? 'var(--accent-soft)' : 'transparent' }}
                   >
                     <button
-                      onClick={() => onOpenWebChat(wc.url, false)}
-                      title={wc.name}
+                      onClick={() => onOpenWebChat(wc, false)}
+                      onDoubleClick={() => onRefreshWebChat(wc)}
+                      title={active ? t('sidebar.webChatDblClickRefresh') : wc.name}
                       className="min-w-0 flex-1 flex items-center gap-2 rounded-lg cursor-pointer select-none"
                       style={{
                         justifyContent: collapsed ? 'center' : 'flex-start',
@@ -252,14 +257,14 @@ export function Sidebar({ view, setView, collapsed, setCollapsed, width, onOpenW
                         color: active ? 'var(--accent)' : 'var(--muted)'
                       }}
                     >
-                      <span className="badge-dot shrink-0" style={{ background: 'var(--muted)' }} />
+                      <span className="badge-dot shrink-0" style={{ background: alive ? 'var(--ok)' : 'var(--muted)' }} />
                       {!collapsed && <span className="truncate text-[12px]">{wc.name}</span>}
                     </button>
                     {!collapsed && (
                       <button
                         className="btn btn-ghost btn-sm !p-1"
                         title={t('sidebar.webChatPopout')}
-                        onClick={() => onOpenWebChat(wc.url, true)}
+                        onClick={() => onOpenWebChat(wc, true)}
                       >
                         <NewWindowIcon />
                       </button>

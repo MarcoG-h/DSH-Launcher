@@ -10,14 +10,24 @@
 
 import { BrowserWindow, shell, WebContentsView, type WebContents } from 'electron'
 import { consumeInstanceAuthUrl, getInstanceAuthUrl, getState, onInstanceAuthUrl } from './harness'
+import { broadcast } from './bus'
 
 const SIDEBAR_EXPANDED = 212
 const SIDEBAR_COLLAPSED = 56
 
-/** 虚拟实例(DeepSeek 官方网页版对话)的特殊视图 id,不映射到任何真实 harness 实例。 */
-export const WEB_CHAT_ID = '__webchat__'
-/** 官方网页版对话地址(内嵌视图加载它)。 */
+/** 官方网页版对话地址(缺省)。 */
 export const WEB_CHAT_URL = 'https://chat.deepseek.com'
+
+// 网页版免费对话(虚拟实例)卡片:每张卡一个常驻 WebContentsView,键 = `web:<卡id>`,
+// 与实例视图同池(relayout / 拖动冻结共用)。卡片间切换、离开再回来都不重载页面;
+// 非活动(切走/离开)满 WEB_IDLE_MS 自动销毁释放内存,下次打开重新加载。
+const WEB_KEY_PREFIX = 'web:'
+const webKey = (id: string): string => `${WEB_KEY_PREFIX}${id}`
+function isWebKey(key: string): boolean {
+  return key.startsWith(WEB_KEY_PREFIX)
+}
+const WEB_IDLE_MS = 30 * 60 * 1000 // 网页卡非活动 30 分钟 → 释放
+const WEB_IDLE_SWEEP_MS = 60 * 1000 // 每 1 分钟清扫一次
 
 const views = new Map<string, WebContentsView>()
 let win: BrowserWindow | null = null
@@ -26,6 +36,32 @@ let active = false
 let sidebarWidth = SIDEBAR_EXPANDED
 const loaded = new Set<string>()
 let onViewAdded: (() => void) | null = null
+// 网页卡:键 → 上次 load 的 url(同 url 重进不重载);键 → 开始非活动的时刻(有值 = 已切走)。
+const webLoadedUrl = new Map<string, string>()
+const webIdleSince = new Map<string, number>()
+let webIdleTimer: ReturnType<typeof setInterval> | null = null
+let lastWebAliveSig = ''
+
+/** 存活网页卡 id(常驻视图还在 → 保活中);变化时广播给渲染层(侧栏点变绿/回灰)。 */
+function emitWebAlive(): void {
+  const ids: string[] = []
+  for (const key of views.keys()) {
+    if (isWebKey(key)) ids.push(key.slice(WEB_KEY_PREFIX.length))
+  }
+  const sig = ids.join(',')
+  if (sig === lastWebAliveSig) return
+  lastWebAliveSig = sig
+  broadcast({ type: 'webchat-views', ids })
+}
+
+/** 当前保活中的网页卡 id(供渲染层初次挂载查询)。 */
+export function aliveWebChatIds(): string[] {
+  const ids: string[] = []
+  for (const key of views.keys()) {
+    if (isWebKey(key)) ids.push(key.slice(WEB_KEY_PREFIX.length))
+  }
+  return ids
+}
 
 // 窗口 resize/move 时 Electron 每帧触发,直接对 WebContentsView setBounds 会让
 // 内嵌页面每帧重排,低配电脑明显卡顿。节流:高频事件合并到 ~30ms 一次,并在事件
@@ -97,6 +133,8 @@ export function registerDshView(host: BrowserWindow): void {
   lastW = iw
   lastH = ih
   dragPoll = setInterval(pollDrag, DRAG_POLL_MS)
+  // 每 1 分钟清扫一次:非活动满 30 分钟的网页卡视图 → 销毁释放内存。
+  webIdleTimer = setInterval(sweepWebIdle, WEB_IDLE_SWEEP_MS)
   // 新版 dsh 认证 token 到达时,若该实例是活动视图,用带 token 的 URL 重载
   // (否则内嵌视图加载的是基础 URL,会 401「authentication required」)。
   onInstanceAuthUrl((id, url) => {
@@ -111,9 +149,14 @@ export function registerDshView(host: BrowserWindow): void {
     if (dragPoll) clearInterval(dragPoll)
     dragPoll = null
     dragging = false
+    if (webIdleTimer) clearInterval(webIdleTimer)
+    webIdleTimer = null
     for (const v of views.values()) v.webContents.close()
     views.clear()
     loaded.clear()
+    webLoadedUrl.clear()
+    webIdleSince.clear()
+    lastWebAliveSig = ''
     win = null
   })
 }
@@ -133,6 +176,10 @@ export function onDshViewAdded(cb: () => void): void {
  * discarded.
  */
 export function setDshActive(instanceId: string, next: boolean, reload?: boolean): void {
+  // 当前是网页卡视图时,任何切走(隐藏或切回实例)都让该卡从此刻开始计闲置;
+  // 若随后 setWebChat(show) 又切回某卡,会清掉它自己的闲置计时。覆盖 web→web、
+  // web→实例、web→隐藏 所有路径。
+  if (active && activeId && isWebKey(activeId)) webIdleSince.set(activeId, Date.now())
   active = next
   if (next) {
     activeId = instanceId
@@ -179,6 +226,7 @@ function ensureViewFor(instanceId: string): WebContentsView | null {
     views.set(instanceId, v)
     // A fresh view lands on top of the existing stack — let the orb move back up.
     onViewAdded?.()
+    if (isWebKey(instanceId)) emitWebAlive() // 网页卡常驻视图诞生 → 通知侧栏点亮
   }
   return v
 }
@@ -213,7 +261,6 @@ export function setDshSidebarWidth(width: number): void {
   sidebarAnimTimer = setTimeout(tick, 16)
 }
 
-let webChatUrl = WEB_CHAT_URL
 let webChatWindow: import('electron').BrowserWindow | null = null
 
 function openWebChatWindow(url: string): void {
@@ -239,25 +286,73 @@ function openWebChatWindow(url: string): void {
   w.on('closed', () => { webChatWindow = null })
 }
 
+/** 销毁一个视图键:清掉相关簿记后 close webContents(网页卡释放 / 实例删除共用)。 */
+function destroyView(key: string): void {
+  loaded.delete(key)
+  webLoadedUrl.delete(key)
+  webIdleSince.delete(key)
+  const v = views.get(key)
+  if (!v) return
+  if (activeId === key) {
+    activeId = null
+    active = false
+  }
+  views.delete(key)
+  if (isWebKey(key)) emitWebAlive() // 常驻视图被释放 → 通知侧栏回灰
+  v.webContents.close()
+  relayout()
+}
+
+/** 清扫:非活动满 WEB_IDLE_MS 的网页卡视图销毁,释放内存(下次打开重新加载)。 */
+function sweepWebIdle(): void {
+  const now = Date.now()
+  for (const [key, since] of webIdleSince) {
+    if (now - since >= WEB_IDLE_MS) destroyView(key)
+  }
+}
+
+/** 网页卡加载:同 url 且非强制刷新则不重载(切走再回来页面原样还在)。 */
+function loadWebChat(key: string, url: string, forceReload: boolean): void {
+  const v = ensureViewFor(key)
+  if (!v) return
+  if (forceReload || webLoadedUrl.get(key) !== url) {
+    webLoadedUrl.set(key, url)
+    void v.webContents.loadURL(url).catch(() => { /* 网络失败静默,下次打开再试 */ })
+  }
+}
+
 /**
- * 打开 DeepSeek 官方网页版对话:
- * - popout=true  → 独立 BrowserWindow(和 dsh 弹出窗口同等的独立窗口)。
- * - popout=false → 应用内嵌 WebContentsView,和 DSH 视图一样贴侧边栏显示;
- *   关闭时 setWebChat(false) 隐藏。
+ * 网页版免费对话(虚拟实例)卡片:
+ * - popout=true  → 独立 BrowserWindow(和 dsh 弹出窗口同等的独立窗口),不受内嵌保活管理。
+ * - popout=false → 应用内嵌 WebContentsView,每张卡一个常驻视图(键 `web:<chatId>`),
+ *   和 DSH 视图一样贴侧边栏。切卡 / 离开再回来不重载;`forceReload=true`(双击刷新,
+ *   F5 语义)、首次打开、或卡 url 变更时才重新加载。关闭只隐藏不销毁;非活动满
+ *   30 分钟由清扫器销毁释放内存(下次打开重新加载)。
  */
-export function setWebChat(show: boolean, url: string, popout: boolean): void {
+export function setWebChat(show: boolean, chatId: string, url: string, popout: boolean, forceReload?: boolean): void {
   if (popout) {
     openWebChatWindow(url)
     return
   }
-  webChatUrl = url
-  active = show
-  activeId = show ? WEB_CHAT_ID : null
-  if (show && win) {
-    const v = ensureViewFor(WEB_CHAT_ID)
-    if (v) void v.webContents.loadURL(url)
+  const key = webKey(chatId || url) // 兜底:无卡 id 时用 url 当键
+  if (show) {
+    // 从别的网页卡切过来:旧卡从此刻开始计闲置。
+    if (active && activeId && isWebKey(activeId) && activeId !== key) webIdleSince.set(activeId, Date.now())
+    active = true
+    activeId = key
+    webIdleSince.delete(key) // 正在看的卡不算闲置
+    loadWebChat(key, url, forceReload === true)
+  } else {
+    if (active && activeId && isWebKey(activeId)) webIdleSince.set(activeId, Date.now())
+    active = false
+    activeId = null
   }
   relayout()
+}
+
+/** 网页卡被删除/不再需要时,主动释放其常驻视图(立即生效,不等 30 分钟)。 */
+export function releaseWebChat(chatId: string): void {
+  destroyView(webKey(chatId))
 }
 
 /**
@@ -268,16 +363,7 @@ export function setWebChat(show: boolean, url: string, popout: boolean): void {
 export function removeDshView(instanceId: string): void {
   // 实例删除时一并清理认证 token。
   consumeInstanceAuthUrl(instanceId)
-  const v = views.get(instanceId)
-  if (!v) return
-  if (activeId === instanceId) {
-    activeId = null
-    active = false
-  }
-  views.delete(instanceId)
-  loaded.delete(instanceId)
-  v.webContents.close()
-  relayout()
+  destroyView(instanceId)
 }
 
 function relayout(): void {

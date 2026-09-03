@@ -840,7 +840,7 @@ function InstanceCard({ inst, onOpen }: { inst: DshInstance; onOpen: () => void 
   )
 }
 
-export function Instances({ onOpenWebChat }: { onOpenWebChat?: (url: string, popout: boolean) => void }): JSX.Element {
+export function Instances({ onOpenWebChat }: { onOpenWebChat?: (chat: { id: string; url: string }, popout: boolean) => void }): JSX.Element {
   const { t } = useI18n()
   const { instances, refresh, tasks, config, saveConfig } = useHarness()
   const [editing, setEditing] = useState<DshInstance | null>(null)
@@ -861,7 +861,7 @@ export function Instances({ onOpenWebChat }: { onOpenWebChat?: (url: string, pop
   const openNewWebChat = (): void => {
     setEditWebChat(null); setCreatingWebChat(true); setWcName(''); setWcDesc(''); setWcUrl('https://chat.deepseek.com'); setWcHidden(false)
   }
-  const saveWebChat = async (): Promise<void> => {
+  const saveWebChat = async (): Promise<WebChatConfig | null> => {
     const name = wcName.trim() || '网页版免费对话'
     const url = wcUrl.trim() || 'https://chat.deepseek.com'
     const next: WebChatConfig = {
@@ -874,10 +874,21 @@ export function Instances({ onOpenWebChat }: { onOpenWebChat?: (url: string, pop
     await saveConfig({ webChats: list })
     setEditWebChat(null); setCreatingWebChat(false)
     await refresh()
+    // 已有卡且改了链接:旧地址的常驻页面已无意义,立即释放,下次打开按新地址加载。
+    if (editWebChat && editWebChat.url !== next.url) api.releaseWebChat(editWebChat.id)
+    return next
+  }
+  // 「打开」= 保存当前编辑(新建即创建)后,以内嵌方式打开该卡(切换不重载;改过 url 已释放,会按新 url 加载)。
+  const saveAndOpenWebChat = async (): Promise<void> => {
+    const saved = await saveWebChat()
+    if (!saved) return
+    if (onOpenWebChat) onOpenWebChat({ id: saved.id, url: saved.url }, false)
+    else void api.setWebChat(true, saved.id, saved.url, false)
   }
   const removeWebChat = async (id: string): Promise<void> => {
     await saveConfig({ webChats: webChats.filter((w) => w.id !== id) })
     setEditWebChat(null)
+    api.releaseWebChat(id) // 立即释放该卡常驻视图,不等 30 分钟
     await refresh()
   }
   const toggleWebChatHidden = async (id: string, hidden: boolean): Promise<void> => {
@@ -1094,7 +1105,7 @@ export function Instances({ onOpenWebChat }: { onOpenWebChat?: (url: string, pop
                 </button>
               ) : <span />}
               <div className="flex items-center gap-2">
-                <button className="btn btn-ghost btn-sm" onClick={() => (onOpenWebChat ? onOpenWebChat(wcUrl, false) : void api.setWebChat(true, wcUrl, false))}>{t('webChat.open')}</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => void saveAndOpenWebChat()}>{t('webChat.open')}</button>
                 <button className="btn btn-primary btn-sm" onClick={() => void saveWebChat()}>{t('webChat.save')}</button>
               </div>
             </div>

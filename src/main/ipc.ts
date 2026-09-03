@@ -290,9 +290,11 @@ export function registerIpc(): void {
     dshview.setDshActive(String(instanceId), Boolean(active), Boolean(reload))
   )
   ipcMain.on('dsh:set-sidebar-width', (_e, width: number) => dshview.setDshSidebarWidth(Number(width)))
-  ipcMain.on('webchat:set', (_e, show: boolean, url: string, popout: boolean) =>
-    dshview.setWebChat(Boolean(show), String(url), Boolean(popout))
+  ipcMain.on('webchat:set', (_e, show: boolean, chatId: string, url: string, popout: boolean, forceReload?: boolean) =>
+    dshview.setWebChat(Boolean(show), String(chatId), String(url), Boolean(popout), Boolean(forceReload))
   )
+  ipcMain.on('webchat:release', (_e, chatId: string) => dshview.releaseWebChat(String(chatId)))
+  ipcMain.handle('webchat:alive', () => dshview.aliveWebChatIds())
 
   // Floating whale orb (a small view over the DSH view) — events come from the
   // dedicated orb page (`?orb=1`); `orb:clicked` goes back to the launcher.

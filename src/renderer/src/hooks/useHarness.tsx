@@ -11,6 +11,8 @@ interface HarnessContextValue {
   logs: Record<string, LogLine[]>
   /** instance id → true when it runs in a separate (popped-out) child window */
   poppedOut: Record<string, boolean>
+  /** 保活中的网页卡 id(常驻视图还在;侧栏据此把卡片状态点亮成绿色)。 */
+  webViewAlive: string[]
   /** all instances (order = sidebar order) */
   instances: DshInstance[]
   /** the instance the UI currently shows */
@@ -54,6 +56,7 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
   const [states, setStates] = useState<Record<string, HarnessState>>({})
   const [logs, setLogs] = useState<Record<string, LogLine[]>>({})
   const [poppedOut, setPoppedOut] = useState<Record<string, boolean>>({})
+  const [webViewAlive, setWebViewAlive] = useState<string[]>([])
   const [instances, setInstances] = useState<DshInstance[]>([])
   const [activeInstanceId, setActiveInstanceId] = useState<string>('')
   const [config, setConfigState] = useState<LauncherConfig | null>(null)
@@ -89,9 +92,13 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
 
   useEffect(() => {
     void refresh()
+    // 初次挂载同步一次保活中的网页卡(main 可能有常驻视图先于本渲染层存在)。
+    void api.getWebChatAlive().then((ids) => setWebViewAlive(ids)).catch(() => {})
     const off = api.onEvent((e: LauncherEvent) => {
       if (e.type === 'state') {
         setStates((prev) => ({ ...prev, [e.state.instanceId]: e.state }))
+      } else if (e.type === 'webchat-views') {
+        setWebViewAlive(e.ids)
       } else if (e.type === 'log') {
         const entry: LogLine = { stream: e.stream, line: e.line, at: e.at }
         setLogs((prev) => {
@@ -221,6 +228,7 @@ export function HarnessProvider({ children }: { children: ReactNode }): ReactNod
         states,
         logs,
         poppedOut,
+        webViewAlive,
         instances,
         activeInstanceId,
         state,
