@@ -8,7 +8,7 @@
 <a href="https://github.com/MarcoG-h/DSH-Launcher"><img src="https://img.shields.io/github/stars/MarcoG-h/DSH-Launcher?style=flat&label=%E2%AD%90&color=08C" alt="GitHub stars"></a>
 <a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/Windows-10%2F11-4493F8?style=flat" alt="Windows"></a>
 <a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/Desktop-App-47848F?style=flat" alt="Desktop App"></a>
-<a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/v3.1.0-Release-2EA44F?style=flat" alt="v3.1.0"></a>
+<a href="https://github.com/MarcoG-h/DSH-Launcher/releases"><img src="https://img.shields.io/badge/v3.1.1-Release-2EA44F?style=flat" alt="v3.1.1"></a>
 <a href="https://github.com/MarcoG-h/DSH-Launcher/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-2EA44F?style=flat" alt="MIT License"></a>
 </p>
 
@@ -61,7 +61,7 @@ the flexibility of the plugin ecosystem becomes something every user can reach.<
 
 | File | Description | Size |
 | --- | --- | --- |
-| [Installer exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v3.1.0/DSH.Launcher.Setup.3.1.0.exe) | NSIS installer; creates desktop / Start menu shortcuts automatically | ~100 MB |
+| [Installer exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v3.1.1/DSH.Launcher.Setup.3.1.1.exe) | NSIS installer; creates desktop / Start menu shortcuts automatically | ~100 MB |
 | [Simple exe](https://github.com/MarcoG-h/DSH-Launcher/releases/download/v2.0.3/DSH.Launcher.Setup.2.0.3.exe) | Minimal version without multi-instance, for users running a single DSH | ~100 MB |
 | [Professional Launcher](https://github.com/baihejiangnan/deepseek-harness-desktop) | Multi-instance system, lightweight, not recommended for beginners | ~ 20 MB |
 
