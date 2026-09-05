@@ -1,0 +1,371 @@
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import * as balance from './balance'
+import * as browserGuard from './browser-guard'
+import { broadcast } from './bus'
+import { getConfig, setConfig } from './config'
+import { t } from './i18n'
+import * as dshview from './dshview'
+import * as harness from './harness'
+import * as instances from './instances'
+import * as orb from './orb'
+import * as market from './market'
+import * as plugins from './plugins'
+import * as runtime from './runtime'
+import * as popup from './popup'
+import * as security from './security'
+import * as skills from './skills'
+import * as mcp from './mcp'
+import { registerEmbeddedView } from './webview'
+import type { DshInstance, MarketSourceId, McpServer, NewInstanceInput, PluginMeta, SkillPolicyPatch } from '../shared/types'
+
+/** Broadcast the instance list so the renderer and tray light stay in sync. */
+function broadcastInstances(): void {
+  const cfg = getConfig()
+  broadcast({ type: 'instances', instances: cfg.instances, activeInstanceId: cfg.activeInstanceId })
+}
+
+export function registerIpc(): void {
+  registerEmbeddedView()
+  ipcMain.handle('state:get', () => ({
+    states: harness.getAllStates(),
+    logs: harness.getAllLogs(),
+    config: getConfig(),
+    // 当前 dsh 版本(内置运行时;源码模式为 null,渲染层据此显示版本或「源码版」)。
+    dshVersion: runtime.currentDshVersion()
+  }))
+
+  ipcMain.handle('logs:clear', () => {
+    harness.clearAllLogs()
+    return true
+  })
+
+  // 原生 window.confirm 在 Electron 中会阻塞渲染进程并夺走焦点/IME,关闭后输入框
+  // 无法正常聚焦输入。改用 main 进程的 native dialog(不阻塞、无焦点问题)。
+  ipcMain.handle('confirm', async (_e, message: string) => {
+    const win = BrowserWindow.getFocusedWindow()
+    const opts = {
+      type: 'question' as const,
+      buttons: [t('取消', 'Cancel'), t('确定', 'OK')],
+      defaultId: 1,
+      cancelId: 0,
+      message: String(message)
+    }
+    const r = win && !win.isDestroyed()
+      ? await dialog.showMessageBox(win, opts)
+      : await dialog.showMessageBox(opts)
+    // 恢复窗口焦点:原生对话框关闭后会夺走窗口焦点,导致之后所有输入框/下拉无法互动
+    // (只能靠切换窗口恢复)。关闭后把焦点还给主窗口。
+    if (win && !win.isDestroyed()) win.focus()
+    return r.response === 1
+  })
+
+  // --- instance lifecycle ---
+  ipcMain.handle('harness:start', (_e, instanceId: string) => harness.startInstance(String(instanceId)))
+  ipcMain.handle('harness:stop', (_e, instanceId: string) => harness.stopInstance(String(instanceId)))
+  ipcMain.handle('harness:restart', (_e, instanceId: string) => harness.restartInstance(String(instanceId)))
+  ipcMain.handle('harness:openUi', (_e, instanceId: string) => {
+    // Renderer calls with no argument to open whatever is active.
+    const id = String(instanceId || instances.getActiveInstance().id)
+    const port = harness.getState(id).port
+    if (port <= 0) return false
+    // 记录「用户手动打开」:浏览器守卫会跳过该端口,不会自动关闭它。
+    browserGuard.markUserOpened(port)
+    return shell.openExternal(`http://127.0.0.1:${port}`)
+  })
+  ipcMain.handle('harness:openInstanceWindow', (_e, instanceId: string) => {
+    // Open (or focus) the instance's DSH UI in a launcher child window.
+    popup.openInstanceWindow(String(instanceId || instances.getActiveInstance().id))
+    return true
+  })
+  ipcMain.handle('harness:closeInstanceWindow', (_e, instanceId: string) => {
+    // Close the instance's separate window, returning it to the embedded view.
+    popup.closeInstanceWindow(String(instanceId || instances.getActiveInstance().id))
+    return true
+  })
+
+  // --- instance management ---
+  ipcMain.handle('instances:setActive', (_e, id: string) => {
+    const cfg = instances.setActiveInstance(String(id))
+    broadcastInstances()
+    return cfg
+  })
+  ipcMain.handle('instances:add', async (_e, input: NewInstanceInput) => {
+    const cfg = await instances.addInstance(input)
+    broadcastInstances()
+    return cfg
+  })
+  ipcMain.handle('instances:update', (_e, id: string, patch: Partial<DshInstance>) => {
+    const cfg = instances.updateInstance(String(id), patch)
+    broadcastInstances()
+    return cfg
+  })
+  ipcMain.handle('instances:remove', async (_e, id: string) => {
+    await harness.stopInstance(String(id))
+    const cfg = await instances.removeInstance(String(id))
+    // 同时清理该实例的嵌入式视图(隐藏的 WebContents 泄漏)。
+    dshview.removeDshView(String(id))
+    broadcastInstances()
+    return cfg
+  })
+
+  ipcMain.handle('config:get', () => getConfig())
+  ipcMain.handle('config:set', (_e, patch: Partial<typeof getConfig>) => setConfig(patch))
+
+  // --- plugins (scoped to one instance's profile) ---
+  ipcMain.handle('plugins:list', () => plugins.listPlugins())
+  ipcMain.handle('plugins:listMatrix', () => plugins.listPluginMatrix())
+  ipcMain.handle('plugins:setMeta', (_e, name: string, meta: PluginMeta) => {
+    plugins.setPluginMeta(String(name), meta)
+    return true
+  })
+
+  /** 实例的 { home, profile }:独立 home(inst.dshHome)或共享 home;兜底取配置镜像。 */
+  const profileFor = (instanceId: string): { home: string; profile: string } => {
+    const inst = instances.getInstance(String(instanceId))
+    if (inst) return { home: instances.instanceDshHome(inst), profile: inst.profile }
+    const cfg = getConfig()
+    return { home: cfg.dshHome, profile: cfg.profile }
+  }
+
+  // A plugin-set change (install / remove / toggle) only takes effect once dsh
+  // re-reads its profile manifest on next boot. We do NOT auto-restart: instead
+  // the affected running instances are marked as awaiting a manual restart (the
+  // sidebar shows them yellow with a "plugin changes" hint). Skipped when the
+  // instance isn't running — the change is simply picked up on next start.
+  const markPendingRestart = (instanceId: string, applied: boolean): void => {
+    if (!applied || !instanceId) return
+    harness.markPendingRestart(String(instanceId))
+  }
+
+  ipcMain.handle('plugins:install', async (_e, instanceId: string, spec: string, name?: string) => {
+    // 写操作前兜底确保 home 物理存在(独立 home 被外部删除时重建空目录,避免神秘报错)
+    const inst = instances.getInstance(String(instanceId))
+    if (inst) instances.ensureInstanceHome(inst)
+    const { home, profile } = profileFor(String(instanceId))
+    const r = await plugins.install(home, profile, String(spec), name == null ? undefined : String(name))
+    markPendingRestart(String(instanceId), r.ok)
+    return r
+  })
+  ipcMain.handle('plugins:disable', async (_e, instanceId: string, name: string) => {
+    const { home, profile } = profileFor(String(instanceId))
+    const r = await plugins.disable(home, profile, String(name))
+    markPendingRestart(String(instanceId), r.ok)
+    return r
+  })
+  ipcMain.handle('plugins:enable', async (_e, instanceId: string, name: string) => {
+    const { home, profile } = profileFor(String(instanceId))
+    const r = await plugins.enable(home, profile, String(name))
+    markPendingRestart(String(instanceId), r.ok)
+    return r
+  })
+  ipcMain.handle('plugins:uninstall', async (_e, instanceId: string, name: string) => {
+    const { home, profile } = profileFor(String(instanceId))
+    const r = await plugins.uninstall(home, profile, String(name))
+    markPendingRestart(String(instanceId), r.ok)
+    return r
+  })
+  ipcMain.handle('plugins:update', async (_e, instanceId: string, name: string) => {
+    const { home, profile } = profileFor(String(instanceId))
+    const r = await plugins.update(home, profile, String(name))
+    markPendingRestart(String(instanceId), r.ok)
+    return r
+  })
+  // 本地持有插件的更新(按仓库):卸载全部实例 + GitHub 拉最新 + 重装。
+  ipcMain.handle('plugins:updateLocal', async (_e, localPath: string) => plugins.updateLocalPlugin(String(localPath)))
+  ipcMain.handle('plugins:removeFromLibrary', async (_e, name: string) => {
+    // 先停运行中的实例,避免本地库文件被进程占用导致删除失败(移除会重建依赖)。
+    for (const inst of instances.getInstances()) {
+      const st = harness.getState(inst.id)
+      if (st.status === 'running' || st.status === 'external') await harness.stopInstance(inst.id)
+    }
+    const r = await plugins.removeFromLibrary(String(name))
+    for (const id of r.affected ?? []) harness.markPendingRestart(id)
+    return r
+  })
+  ipcMain.handle('plugins:removeFromLibraryMany', async (_e, names: string[]) => {
+    const list = (Array.isArray(names) ? names : []).map(String)
+    for (const inst of instances.getInstances()) {
+      const st = harness.getState(inst.id)
+      if (st.status === 'running' || st.status === 'external') await harness.stopInstance(inst.id)
+    }
+    const r = await plugins.removeFromLibraryMany(list)
+    for (const id of r.affected ?? []) harness.markPendingRestart(id)
+    return r
+  })
+  ipcMain.handle('bundles:list', async () => plugins.fetchRemoteBundles())
+  ipcMain.handle('bundles:install', (_e, bundleId: string, options?: { retrySpecs?: string[]; homeMode?: 'shared' | 'isolated'; home?: string }) => {
+    const o = options ?? {}
+    return plugins.installBundle(String(bundleId), {
+      ...(Array.isArray(o.retrySpecs) ? { retrySpecs: o.retrySpecs.map(String) } : {}),
+      ...(o.homeMode === 'shared' || o.homeMode === 'isolated'
+        ? { homeMode: o.homeMode, home: o.homeMode === 'shared' ? String(o.home ?? '') : undefined }
+        : {})
+    })
+  })
+
+  // --- skills (library-first; the matrix assigns library entries to instance homes) ---
+  // Per-instance copy state (matrix cells): dsh watches the home's skills dir → hot, no restart.
+  ipcMain.handle('skills:list', (_e, instanceId: string) => skills.listSkills(String(instanceId)))
+  ipcMain.handle('skills:setEnabled', (_e, instanceId: string, name: string, enabled: boolean) => {
+    skills.setSkillEnabled(String(instanceId), String(name), Boolean(enabled))
+    return true
+  })
+  ipcMain.handle('skills:setPolicy', (_e, instanceId: string, name: string, patch: SkillPolicyPatch) => {
+    skills.setSkillPolicy(String(instanceId), String(name), patch as SkillPolicyPatch)
+    return true
+  })
+  // Library store — install / import / create / update / delete all write the library.
+  ipcMain.handle('skills:library/list', () => skills.listSkillLibrary())
+  ipcMain.handle('skills:library/enable', (_e, instanceId: string, name: string) =>
+    skills.enableSkillFromLibrary(String(instanceId), String(name)))
+  ipcMain.handle('skills:library/installRepo', async (_e, url: string) => skills.installSkillRepo(String(url)))
+  ipcMain.handle('skills:library/checkUpdates', async () => skills.checkSkillUpdates())
+  ipcMain.handle('skills:library/update', async (_e, name: string) => skills.updateSkill(String(name)))
+  ipcMain.handle('skills:library/delete', (_e, name: string) => {
+    skills.deleteSkillLibrary(String(name))
+    return true
+  })
+  ipcMain.handle('skills:library/importFile', async () => skills.importSkillFileDialog())
+  // Direct path import (drag & drop): a folder containing SKILL.md, or a `.md` file → library.
+  ipcMain.handle('skills:importPath', (_e, path: string) => skills.importSkillPath(String(path)))
+  ipcMain.handle('skills:create', (_e, name: string, description: string, content: string) =>
+    skills.createSkill(String(name), String(description), String(content)))
+  ipcMain.handle('skills:library/setPolicy', (_e, name: string, patch: SkillPolicyPatch) => {
+    skills.setSkillLibraryPolicy(String(name), patch as SkillPolicyPatch)
+    return true
+  })
+  ipcMain.handle('skills:market', async (_e, query?: string, onlyTopic?: string) =>
+    skills.searchSkillMarket(query == null ? undefined : String(query), onlyTopic == null ? undefined : String(onlyTopic)))
+  ipcMain.handle('skills:repoSkills', async (_e, owner: string, repo: string) =>
+    skills.listSkillRepoSkills(String(owner), String(repo)))
+
+  // --- MCP servers (library-first; the matrix assigns library configs to instance patches) ---
+  ipcMain.handle('mcp:list', (_e, instanceId: string) => mcp.listMcpServers(String(instanceId)))
+  ipcMain.handle('mcp:loader', (_e, instanceId: string) => mcp.isMcpLoaderInstalled(String(instanceId)))
+  ipcMain.handle('mcp:save', (_e, instanceId: string, server: unknown, originalId?: string) => {
+    const result = mcp.saveMcpServer(String(instanceId), server as McpServer, originalId == null ? undefined : String(originalId))
+    markPendingRestart(String(instanceId), true)
+    return result
+  })
+  ipcMain.handle('mcp:library/list', () => mcp.listMcpLibrary())
+  ipcMain.handle('mcp:library/save', (_e, server: unknown, originalName?: string) => {
+    const orig = originalName == null ? undefined : String(originalName)
+    const serverName = String(((server as McpServer | null)?.serverName ?? '').trim())
+    const affected = new Set<string>()
+    for (const n of [orig, serverName]) {
+      if (n) for (const id of mcp.instancesUsingMcpServer(n)) affected.add(id)
+    }
+    const result = mcp.saveMcpLibrary(server as McpServer, orig)
+    for (const id of affected) markPendingRestart(id, true)
+    return result
+  })
+  ipcMain.handle('mcp:library/delete', (_e, name: string) => {
+    const affected = mcp.instancesUsingMcpServer(String(name))
+    const result = mcp.deleteMcpLibrary(String(name))
+    for (const id of affected) markPendingRestart(id, true)
+    return result
+  })
+
+  ipcMain.handle('build:repair', () => plugins.repairDeps())
+  ipcMain.handle('build:rebuild', () => plugins.rebuild())
+  ipcMain.handle('download:harness', () => plugins.downloadHarness())
+  // Download to the shared library only — no install, no enable, no restart.
+  ipcMain.handle('download:plugin', async (_e, url: string, subdir?: string, instanceId?: string) => {
+    return plugins.downloadPlugin(String(url), subdir == null ? undefined : String(subdir), profileFor(String(instanceId)).profile)
+  })
+
+  // Install/upgrade of the portable runtime must not race a running harness
+  // (npm writes the files the bundled dsh is executing).
+  const busyGuard = (fn: () => Promise<{ ok: boolean }>): (() => Promise<{ ok: boolean; code: number | null; error?: string }>) => {
+    return async () => {
+      const anyRunning = Object.values(harness.getAllStates()).some((s) => s.status === 'running' || s.status === 'starting' || s.status === 'stopping')
+      if (anyRunning) {
+        return { ok: false, code: null, error: t('请先停止 dsh,再安装 / 更新运行环境。', 'Stop dsh first, then install / update the runtime.') }
+      }
+      return (await fn()) as { ok: boolean; code: number | null; error?: string }
+    }
+  }
+  ipcMain.handle('runtime:install', busyGuard(runtime.installRuntime))
+  ipcMain.handle('runtime:update', busyGuard(async () => {
+    // 更新前检测运行中的实例:正在被使用的 dsh 文件(在 .dsh-runtime 下)替换会被
+    // 进程占用而失败,也可能让运行中的实例崩溃。UI 会先弹窗自动停止,这里是兜底。
+    for (const inst of instances.getInstances()) {
+      const st = harness.getState(inst.id)
+      if (st.status === 'running' || st.status === 'external') {
+        return { ok: false, code: 1, error: t(`实例「${inst.name}」正在运行 — 请先关闭所有实例再更新 dsh`, `Instance "${inst.name}" is running — stop all instances before updating dsh`) }
+      }
+    }
+    return runtime.updateRuntime()
+  }))
+
+  ipcMain.handle('balance:get', () => balance.getBalance())
+
+  // Security: read the dsh-audit probe's audit events + manage security settings.
+  ipcMain.handle('security:list', () => security.listAuditEvents())
+  ipcMain.handle('security:clearAudit', () => security.clearAudit())
+  ipcMain.handle('security:exportAudit', () => security.exportAudit())
+  ipcMain.handle('security:getWhitelist', () => security.getWhitelist())
+  ipcMain.handle('security:openWhitelistFile', () => security.openWhitelistFile())
+  ipcMain.handle('security:getConfig', () => security.getSecurityConfig())
+  ipcMain.handle('security:setConfig', (_e, patch: unknown) => security.setSecurityConfig((patch ?? {}) as Partial<security.SecurityConfig>))
+  // 探针管理:每个实例检测/安装/开关。
+  ipcMain.handle('security:listProbeStatus', () => security.listProbeStatus())
+  ipcMain.handle('security:installProbe', (_e, instanceId: string) => security.installProbe(String(instanceId)))
+  ipcMain.handle('security:removeProbe', (_e, instanceId: string) => security.removeProbe(String(instanceId)))
+  ipcMain.handle('security:reinstallProbe', (_e, instanceId: string) => security.reinstallProbe(String(instanceId)))
+
+  // Plugin market (GitHub search, unauthenticated).
+  ipcMain.handle('market:search', (_e, sourceId: string, page: number, query?: string, categoryId?: string, force?: boolean) =>
+    market.searchMarket((sourceId as MarketSourceId) || 'github', page, query, categoryId, Boolean(force)))
+  ipcMain.handle('market:readme', (_e, owner: string, repo: string) => market.fetchReadme(String(owner), String(repo)))
+
+  // External links inside the market README: confirm with a native dialog, then
+  // open via the system browser. Never navigates the launcher window itself.
+  ipcMain.handle('shell:openExternal', async (_e, url: string) => {
+    const u = String(url ?? '')
+    if (!/^(https?:|mailto:)/i.test(u)) return false
+    const win = BrowserWindow.getFocusedWindow()
+    const { response } = await (win && !win.isDestroyed()
+      ? dialog.showMessageBox(win, {
+        type: 'question',
+        buttons: [t('打开', 'Open'), t('取消', 'Cancel')],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        message: t('用浏览器打开外部链接?', 'Open external link in browser?'),
+        detail: u
+      })
+      : dialog.showMessageBox({
+        type: 'question',
+        buttons: [t('打开', 'Open'), t('取消', 'Cancel')],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+        message: t('用浏览器打开外部链接?', 'Open external link in browser?'),
+        detail: u
+      }))
+    if (win && !win.isDestroyed()) win.focus()
+    if (response !== 0) return false
+    await shell.openExternal(u)
+    return true
+  })
+
+  // Embedded DSH view (native WebContentsView) — bounds follow the sidebar.
+  ipcMain.on('dsh:set-active', (_e, instanceId: string, active: boolean, reload?: boolean) =>
+    dshview.setDshActive(String(instanceId), Boolean(active), Boolean(reload))
+  )
+  ipcMain.on('dsh:set-sidebar-width', (_e, width: number) => dshview.setDshSidebarWidth(Number(width)))
+  ipcMain.on('webchat:set', (_e, show: boolean, chatId: string, url: string, popout: boolean, forceReload?: boolean) =>
+    dshview.setWebChat(Boolean(show), String(chatId), String(url), Boolean(popout), Boolean(forceReload))
+  )
+  ipcMain.on('webchat:release', (_e, chatId: string) => dshview.releaseWebChat(String(chatId)))
+  ipcMain.handle('webchat:alive', () => dshview.aliveWebChatIds())
+
+  // Floating whale orb (a small view over the DSH view) — events come from the
+  // dedicated orb page (`?orb=1`); `orb:clicked` goes back to the launcher.
+  ipcMain.on('orb:set-visible', (_e, visible: boolean) => orb.setOrbVisible(Boolean(visible)))
+  ipcMain.on('orb:drag-start', (_e, ox: number, oy: number) => orb.orbDragStart(Number(ox), Number(oy)))
+  ipcMain.on('orb:drag-move', (_e, sx: number, sy: number) => orb.orbDragMove(Number(sx), Number(sy)))
+  ipcMain.on('orb:drag-end', () => orb.orbDragEnd())
+  ipcMain.on('orb:click', () => orb.orbClick())
+}

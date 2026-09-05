@@ -1,0 +1,104 @@
+import { contextBridge, ipcRenderer } from 'electron'
+import type { DshLauncherApi, LauncherEvent } from '../shared/types'
+
+const api: DshLauncherApi = {
+  getState: () => ipcRenderer.invoke('state:get'),
+  clearLogs: () => ipcRenderer.invoke('logs:clear'),
+  confirm: (message) => ipcRenderer.invoke('confirm', message),
+  startInstance: (instanceId) => ipcRenderer.invoke('harness:start', instanceId),
+  stopInstance: (instanceId) => ipcRenderer.invoke('harness:stop', instanceId),
+  restartInstance: (instanceId) => ipcRenderer.invoke('harness:restart', instanceId),
+  setActiveInstance: (instanceId) => ipcRenderer.invoke('instances:setActive', instanceId),
+  addInstance: (input) => ipcRenderer.invoke('instances:add', input),
+  updateInstance: (instanceId, patch) => ipcRenderer.invoke('instances:update', instanceId, patch),
+  removeInstance: (instanceId) => ipcRenderer.invoke('instances:remove', instanceId),
+  openUi: (instanceId) => ipcRenderer.invoke('harness:openUi', instanceId),
+  openInstanceWindow: (instanceId) => ipcRenderer.invoke('harness:openInstanceWindow', instanceId),
+  closeInstanceWindow: (instanceId) => ipcRenderer.invoke('harness:closeInstanceWindow', instanceId),
+  getConfig: () => ipcRenderer.invoke('config:get'),
+  setConfig: (patch) => ipcRenderer.invoke('config:set', patch),
+  securityList: () => ipcRenderer.invoke('security:list'),
+  securityClearAudit: () => ipcRenderer.invoke('security:clearAudit'),
+  securityExportAudit: () => ipcRenderer.invoke('security:exportAudit'),
+  securityGetWhitelist: () => ipcRenderer.invoke('security:getWhitelist'),
+  securityOpenWhitelistFile: () => ipcRenderer.invoke('security:openWhitelistFile'),
+  securityGetConfig: () => ipcRenderer.invoke('security:getConfig'),
+  securitySetConfig: (patch) => ipcRenderer.invoke('security:setConfig', patch),
+  securityListProbeStatus: () => ipcRenderer.invoke('security:listProbeStatus'),
+  securityInstallProbe: (instanceId) => ipcRenderer.invoke('security:installProbe', instanceId),
+  securityRemoveProbe: (instanceId) => ipcRenderer.invoke('security:removeProbe', instanceId),
+  securityReinstallProbe: (instanceId) => ipcRenderer.invoke('security:reinstallProbe', instanceId),
+  listPlugins: () => ipcRenderer.invoke('plugins:list'),
+  listPluginMatrix: () => ipcRenderer.invoke('plugins:listMatrix'),
+  setPluginMeta: (name, meta) => ipcRenderer.invoke('plugins:setMeta', name, meta),
+  installPlugin: (instanceId, spec, name) => ipcRenderer.invoke('plugins:install', instanceId, spec, name),
+  disablePlugin: (instanceId, name) => ipcRenderer.invoke('plugins:disable', instanceId, name),
+  enablePlugin: (instanceId, name) => ipcRenderer.invoke('plugins:enable', instanceId, name),
+  uninstallPlugin: (instanceId, name) => ipcRenderer.invoke('plugins:uninstall', instanceId, name),
+  updatePlugin: (instanceId, name) => ipcRenderer.invoke('plugins:update', instanceId, name),
+  updateLocalPlugin: (name) => ipcRenderer.invoke('plugins:updateLocal', name),
+  removeFromLibrary: (name) => ipcRenderer.invoke('plugins:removeFromLibrary', name),
+  removeFromLibraryMany: (names) => ipcRenderer.invoke('plugins:removeFromLibraryMany', names),
+  repairDeps: () => ipcRenderer.invoke('build:repair'),
+  rebuild: () => ipcRenderer.invoke('build:rebuild'),
+  downloadHarness: () => ipcRenderer.invoke('download:harness'),
+  downloadPlugin: (url, subdir, instanceId) => ipcRenderer.invoke('download:plugin', url, subdir, instanceId),
+  installBundle: (bundleId, options) => ipcRenderer.invoke('bundles:install', bundleId, options),
+  bundles: () => ipcRenderer.invoke('bundles:list'),
+  installRuntime: () => ipcRenderer.invoke('runtime:install'),
+  updateRuntime: () => ipcRenderer.invoke('runtime:update'),
+  getBalance: () => ipcRenderer.invoke('balance:get'),
+  searchMarket: (sourceId, page, query, categoryId, force) =>
+    ipcRenderer.invoke('market:search', sourceId, page, query, categoryId, force),
+  fetchMarketReadme: (owner, repo) => ipcRenderer.invoke('market:readme', owner, repo),
+  confirmOpenExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
+  setDshActive: (instanceId, active, reload) => ipcRenderer.send('dsh:set-active', instanceId, active, reload),
+  setDshSidebarWidth: (width) => ipcRenderer.send('dsh:set-sidebar-width', width),
+  setWebChat: (show, chatId, url, popout, forceReload) =>
+    ipcRenderer.send('webchat:set', show, chatId, url, popout, forceReload),
+  releaseWebChat: (chatId) => ipcRenderer.send('webchat:release', chatId),
+  getWebChatAlive: () => ipcRenderer.invoke('webchat:alive'),
+  listSkillLibrary: () => ipcRenderer.invoke('skills:library/list'),
+  listSkills: (instanceId) => ipcRenderer.invoke('skills:list', instanceId),
+  setSkillEnabled: (instanceId, name, enabled) => ipcRenderer.invoke('skills:setEnabled', instanceId, name, enabled),
+  enableSkillFromLibrary: (instanceId, name) => ipcRenderer.invoke('skills:library/enable', instanceId, name),
+  installSkillRepo: (url) => ipcRenderer.invoke('skills:library/installRepo', url),
+  listRepoSkills: (url) => ipcRenderer.invoke('skills:listRepo', url),
+  checkSkillUpdates: () => ipcRenderer.invoke('skills:library/checkUpdates'),
+  updateSkill: (name) => ipcRenderer.invoke('skills:library/update', name),
+  deleteSkillLibrary: (name) => ipcRenderer.invoke('skills:library/delete', name),
+  importSkillFileDialog: () => ipcRenderer.invoke('skills:library/importFile'),
+  importSkillPath: (path) => ipcRenderer.invoke('skills:importPath', path),
+  createSkill: (name, description, content) => ipcRenderer.invoke('skills:create', name, description, content),
+  searchSkillMarket: (query, onlyTopic) => ipcRenderer.invoke('skills:market', query, onlyTopic),
+  listSkillRepoSkills: (owner, repo) => ipcRenderer.invoke('skills:repoSkills', owner, repo),
+  setSkillPolicy: (instanceId, name, patch) => ipcRenderer.invoke('skills:setPolicy', instanceId, name, patch),
+  setSkillLibraryPolicy: (name, patch) => ipcRenderer.invoke('skills:library/setPolicy', name, patch),
+  listMcpServers: (instanceId) => ipcRenderer.invoke('mcp:list', instanceId),
+  mcpLoaderInstalled: (instanceId) => ipcRenderer.invoke('mcp:loader', instanceId),
+  saveMcpServer: (instanceId, server, originalId) => ipcRenderer.invoke('mcp:save', instanceId, server, originalId),
+  listMcpLibrary: () => ipcRenderer.invoke('mcp:library/list'),
+  saveMcpLibrary: (server, originalName) => ipcRenderer.invoke('mcp:library/save', server, originalName),
+  deleteMcpLibrary: (name) => ipcRenderer.invoke('mcp:library/delete', name),
+  setOrbVisible: (visible) => ipcRenderer.send('orb:set-visible', visible),
+  orbDragStart: (ox, oy) => ipcRenderer.send('orb:drag-start', ox, oy),
+  orbDragMove: (sx, sy) => ipcRenderer.send('orb:drag-move', sx, sy),
+  orbDragEnd: () => ipcRenderer.send('orb:drag-end'),
+  orbClick: () => ipcRenderer.send('orb:click'),
+  onOrbClicked: (cb) => {
+    const listener = (): void => cb()
+    ipcRenderer.on('orb:clicked', listener)
+    return () => {
+      ipcRenderer.removeListener('orb:clicked', listener)
+    }
+  },
+  onEvent: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, data: LauncherEvent): void => cb(data)
+    ipcRenderer.on('harness:event', listener)
+    return () => {
+      ipcRenderer.removeListener('harness:event', listener)
+    }
+  }
+}
+
+contextBridge.exposeInMainWorld('dshLauncher', api)
