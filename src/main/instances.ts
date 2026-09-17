@@ -3,7 +3,8 @@
 // workspace); this module is the read/write surface and the session-isolation
 // helpers. The spawned processes themselves are managed by harness.ts.
 
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { removeDirSafe } from './fs-safe'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { getConfig, setConfig } from './config'
@@ -40,6 +41,10 @@ autoInstallPeers: false
 allowBuilds:
   node-llama-cpp: true
   node-pty: true
+  koffi: true
+  protobufjs: true
+  '@google/genai': true
+  '@deepseek-ai/dsh-subprocess-local': true
 supportedArchitectures:
   os:
     - ${process.platform}
@@ -343,17 +348,19 @@ export async function removeInstance(id: string): Promise<LauncherConfig> {
       : cfg.activeInstanceId
 
   // —— 真正清理磁盘(仅删「该实例专属、且确认无共享」的数据,防误删其余实例) ——
+  // 用 removeDirSafe:这些目录里普遍带 junction(profile/node_modules → 回退层),
+  // Electron 下裸 rmSync 会静默不删、留下「孤儿 home」(此前实际发生过)。
   try {
     // 1) workspace(实例专属 runtimeRoot/workspaces/<id>),删除绝对安全。
-    if (inst.workspace) rmSync(inst.workspace, { recursive: true, force: true })
+    if (inst.workspace) removeDirSafe(inst.workspace)
     // 2) profile 目录:仅当「没有其他实例」在该 home 使用同名 profile 时才删。
     //    共享 home 下多个实例可能共用同一 profile,删了会让其余实例 boot 失败——
     //    这是此前误删导致全部实例损坏的根源。
     const home = instanceDshHome(inst)
     const sharedElsewhere = instances.some(o => instanceDshHome(o) === home && o.profile === inst.profile)
-    if (!sharedElsewhere) rmSync(profileDir(home, inst.profile), { recursive: true, force: true })
+    if (!sharedElsewhere) removeDirSafe(profileDir(home, inst.profile))
     // 3) 独立 home(实例专属 runtimeRoot/homes/<id>):UI 删除前已二次确认,此处直接清理。
-    if (inst.dshHome) rmSync(inst.dshHome, { recursive: true, force: true })
+    if (inst.dshHome) removeDirSafe(inst.dshHome)
   } catch {
     // 删除失败(文件被占用等)不阻断配置移除——残留由用户自行决定是否手动清理。
   }

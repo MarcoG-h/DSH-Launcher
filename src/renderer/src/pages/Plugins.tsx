@@ -654,6 +654,8 @@ function PluginDetailModal({
   const [updating, setUpdating] = useState(false)
   const [saved, setSaved] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  // 本地库仓库确认:一个仓库可能含多个插件 → 询问「仅删此插件 / 整仓删除」。
+  const [repoPrompt, setRepoPrompt] = useState<{ repoName: string; plugins: { name: string }[] } | null>(null)
 
   useEffect(() => {
     setDisplayName(row.displayName === row.name ? '' : row.displayName)
@@ -662,15 +664,12 @@ function PluginDetailModal({
     setErr(null)
   }, [row])
 
-  const removeFromLibrary = async (): Promise<void> => {
-    const direct = row.path === ''
-    if (!await api.confirm(direct ? t('plugins.uninstallAllConfirm', { name: row.displayName }) : t('plugins.removeFromLibraryConfirm', { name: row.displayName }))) return
+  /** 统一执行删除:展示主进程返回的真实失败原因(如目录被占用),不当作移除成功。 */
+  const doRemove = async (fn: () => Promise<{ ok: boolean; error?: string }>): Promise<void> => {
     setRemoving(true)
     setErr(null)
     try {
-      const r = await api.removeFromLibrary(row.name)
-      // 主进程可能返回 ok:false(如 Windows 目录被运行中的实例占用)——此时展示
-      // 具体原因,不当作移除成功。
+      const r = await fn()
       if (!r.ok) {
         setErr(r.error ?? t('plugins.removeFailed'))
         return
@@ -681,6 +680,28 @@ function PluginDetailModal({
     } finally {
       setRemoving(false)
     }
+  }
+
+  const removeFromLibrary = async (): Promise<void> => {
+    const direct = row.path === ''
+    if (direct) {
+      if (!await api.confirm(t('plugins.uninstallAllConfirm', { name: row.displayName }))) return
+      await doRemove(() => api.removeFromLibrary(row.name))
+      return
+    }
+    // 本地库行:先查仓库归属 —— 一个仓库含多个插件时,弹窗询问是否整仓删除。
+    let info: { repoName: string; plugins: { name: string }[] } | null = null
+    try {
+      info = await api.libraryRepoInfo(row.name)
+    } catch {
+      info = null
+    }
+    if (info && info.plugins.length > 1) {
+      setRepoPrompt(info)
+      return
+    }
+    if (!await api.confirm(t('plugins.removeFromLibraryConfirm', { name: row.displayName }))) return
+    await doRemove(() => api.removeFromLibrary(row.name))
   }
 
   const updateLocal = async (): Promise<void> => {
@@ -822,6 +843,38 @@ function PluginDetailModal({
             </button>
           </div>
         </div>
+
+        {/* 仓库内含多个插件时的删除选择:仅删此插件 / 整仓删除(含确认) */}
+        {repoPrompt && (() => {
+          const names = repoPrompt.plugins.map((p) => p.name)
+          const preview = names.slice(0, 6).join('、') + (names.length > 6 ? ' …' : '')
+          return (
+            <div
+              className="fixed inset-0 z-[60] flex items-center justify-center p-6"
+              style={{ background: 'rgba(0,0,0,0.55)' }}
+              onClick={() => setRepoPrompt(null)}
+            >
+              <div className="card p-4 w-full max-w-[480px] space-y-3" onClick={(e) => e.stopPropagation()}>
+                <h3 className="text-[15px] font-semibold">{t('plugins.repoRemoveTitle')}</h3>
+                <p className="text-[12.5px] leading-relaxed" style={{ color: 'var(--muted)' }}>
+                  {t('plugins.repoRemoveBody', { repo: repoPrompt.repoName, count: repoPrompt.plugins.length, names: preview })}
+                </p>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button className="btn btn-ghost" disabled={removing} onClick={() => setRepoPrompt(null)}>
+                    {t('plugins.repoRemoveCancel')}
+                  </button>
+                  <button
+                    className="btn btn-danger"
+                    disabled={removing}
+                    onClick={() => { setRepoPrompt(null); void doRemove(() => api.removeRepoFromLibrary(row.name)) }}
+                  >
+                    {t('plugins.repoRemoveAll', { count: repoPrompt.plugins.length })}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        })()}
       </div>
     </div>
   )

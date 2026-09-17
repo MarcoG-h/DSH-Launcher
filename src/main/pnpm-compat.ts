@@ -87,14 +87,14 @@ export function classifyPnpmFailure(output: string): PnpmFailure | null {
     return {
       code: 'ignored-builds',
       recoverable: false,
-      message: '有依赖需要执行构建脚本,被 pnpm 默认拦截。请在「插件管理」里允许构建脚本后重试 / a dependency needs to run build scripts, which pnpm blocks by default — allow build scripts and retry',
+      message: '有依赖需要执行构建脚本,被 pnpm 的供应链策略拦截。启动器已自动把这些包加入该 profile 的构建白名单并重试一次;若仍失败,请把控制台日志发给作者 / a dependency\'s build scripts were blocked by pnpm; the launcher added them to this profile\'s build allowlist and retried once — if it still fails, please share the console log',
     }
   }
   if (output.includes('ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED')) {
     return {
       code: 'git-prepare-not-allowed',
       recoverable: false,
-      message: '这个 git 插件需要在安装时执行构建脚本,被 pnpm 默认拦截。允许构建脚本后重试即可 / this git-hosted plugin needs to run its build script at install time, which pnpm blocks by default — allow build scripts and retry',
+      message: '这个 git 插件需要在安装时执行构建脚本,被 pnpm 的供应链策略拦截。启动器已自动加入该 profile 的构建白名单并重试;若仍失败,请把控制台日志发给作者 / this git-hosted plugin runs a build script at install time, which pnpm blocked; the launcher added it to the profile allowlist and retried — if it still fails, please share the console log',
     }
   }
   // GitHub 直装插件(`github:owner/repo` / `git+…`)在拉取仓库时网络失败时,git 的

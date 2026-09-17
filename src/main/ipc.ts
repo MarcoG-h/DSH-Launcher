@@ -171,22 +171,21 @@ export function registerIpc(): void {
   // 本地持有插件的更新(按仓库):卸载全部实例 + GitHub 拉最新 + 重装。
   ipcMain.handle('plugins:updateLocal', async (_e, localPath: string) => plugins.updateLocalPlugin(String(localPath)))
   ipcMain.handle('plugins:removeFromLibrary', async (_e, name: string) => {
-    // 先停运行中的实例,避免本地库文件被进程占用导致删除失败(移除会重建依赖)。
-    for (const inst of instances.getInstances()) {
-      const st = harness.getState(inst.id)
-      if (st.status === 'running' || st.status === 'external') await harness.stopInstance(inst.id)
-    }
     const r = await plugins.removeFromLibrary(String(name))
     for (const id of r.affected ?? []) harness.markPendingRestart(id)
     return r
   })
   ipcMain.handle('plugins:removeFromLibraryMany', async (_e, names: string[]) => {
     const list = (Array.isArray(names) ? names : []).map(String)
-    for (const inst of instances.getInstances()) {
-      const st = harness.getState(inst.id)
-      if (st.status === 'running' || st.status === 'external') await harness.stopInstance(inst.id)
-    }
     const r = await plugins.removeFromLibraryMany(list)
+    for (const id of r.affected ?? []) harness.markPendingRestart(id)
+    return r
+  })
+  // 一个本地库仓库可能含多个插件(monorepo/合集):删除时前端先问仓库归属,
+  // 由用户选择「仅删此插件」或「整仓删除」。
+  ipcMain.handle('plugins:libraryRepo', (_e, name: string) => plugins.libraryRepoInfo(String(name)))
+  ipcMain.handle('plugins:repoRemove', async (_e, name: string) => {
+    const r = await plugins.removeRepoFromLibrary(String(name))
     for (const id of r.affected ?? []) harness.markPendingRestart(id)
     return r
   })

@@ -1,10 +1,11 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, delimiter, dirname, join, resolve, sep } from 'node:path'
+import { basename, delimiter, dirname, join, relative, resolve, sep } from 'node:path'
 import * as yaml from 'js-yaml'
 import { net } from 'electron'
 import { getConfig, setConfig } from './config'
+import { removeDirSafe } from './fs-safe'
 import { addInstance, getActiveInstance, instanceDshHome } from './instances'
 import { t } from './i18n'
 import { bundledEnv, downloadFile, extractZip, progressLine, resolveBundledNode } from './runtime'
@@ -252,6 +253,18 @@ async function runPluginCommand(home: string, profile: string, extra: string[], 
   } else if (failure?.code === 'fetch-timeout' && (extra[0] === 'add' || extra[0] === 'remove')) {
     taskLine(label, t('[install] 下载超时,用更长的请求超时重试一次…', '[install] download timed out; retrying once with a longer fetch timeout…'), 'stderr')
     r = await runOnce([extra[0], '--config.fetchTimeout=600000', ...extra.slice(1)])
+  } else if (failure?.code === 'ignored-builds' && (extra[0] === 'add' || extra[0] === 'remove')) {
+    // pnpm 10+ 的供应链策略默认拦截依赖的 install/postinstall 构建脚本(原生模块
+    // 靠它编译)。把报错列出的包加进该 profile 的 allowBuilds —— 让脚本真正执行,
+    // 而不是简单绕过策略;然后自动重试一次。
+    const blocked = parseIgnoredBuildPackages(output)
+    const keys = blocked.length > 0 ? blocked : STANDARD_ALLOW_BUILDS
+    taskLine(label, t(
+      `[install] pnpm 拦截了依赖构建脚本(${keys.join(', ')}),已加入该 profile 的构建白名单并重试…`,
+      `[install] pnpm blocked dependency build scripts (${keys.join(', ')}); added them to this profile's build allowlist and retrying…`
+    ), 'stderr')
+    allowBuildsAdd(home, profile, keys)
+    r = await runOnce(extra)
   }
   if (!ok(r) && failure !== null) {
     r = { ...r, error: failure.message }
@@ -335,24 +348,6 @@ function scanLocal(): Array<Omit<LocalPlugin, 'status'>> {
   for (const entry of readdirSync(cfg.pluginDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue
     if (entry.name === 'node_modules') continue // 运行时链接层(junction),不是插件仓库
-    if (entry.name.startsWith('.deleting-')) {
-      // 删除改名兜底遗留的残留:扫描时自动清理(未被占用的直接删),不显示成行。
-      const p = join(cfg.pluginDir, entry.name)
-      try {
-        rmSync(p, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 })
-      } catch {
-        // 长路径(旧版反复改名叠加)/Windows 句柄:改名成固定短名再删。
-        try {
-          const short = join(cfg.pluginDir, `.deleting-${process.pid}`)
-          if (p !== short) {
-            if (existsSync(short)) rmSync(short, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
-            renameSync(p, short)
-          }
-          rmSync(short, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 })
-        } catch { /* 仍被占用,留待下次扫描清理 */ }
-      }
-      continue
-    }
     const entryPath = join(cfg.pluginDir, entry.name)
     if (looksLikeDshPlugin(entryPath).ok) {
       const pkg = readJson(join(entryPath, 'package.json')) ?? {}
@@ -506,6 +501,70 @@ function depNames(home: string, profile: string): Set<string> {
   return new Set(Object.keys(deps))
 }
 
+/** 依赖名 → pnpm-workspace.yaml 的 allowBuilds 键(`@` 开头必须加引号,YAML 保留字符)。 */
+function allowBuildsKey(name: string): string {
+  return name.startsWith('@') ? `'${name}'` : name
+}
+
+/** 只接受合法包名(含 scope),避免把报错里的杂项当成键写进 YAML。 */
+function isPackageName(name: string): boolean {
+  return /^(?:@[A-Za-z0-9._-]+\/)?[A-Za-z0-9._-]+$/.test(name)
+}
+
+/** 该键是否已存在于 allowBuilds 块(任意值都算;避免写出重复键把 YAML 弄坏)。 */
+function hasAllowBuildsKey(lines: string[], name: string): boolean {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(`^[ \\t]*['"]?${esc}['"]?[ \\t]*:`)
+  return lines.some((l) => re.test(l))
+}
+
+/**
+ * 往 profile 的 `pnpm-workspace.yaml` 的 `allowBuilds:` 追加缺失键(幂等)。
+ * 返回是否真的写入了新键。用于:① git 插件 prepare 被拦(单键);② registry 依赖
+ * 的 install/postinstall 被 pnpm 供应链策略拦(`ERR_PNPM_IGNORED_BUILDS`,多键)。
+ *
+ * 只做「追加」:键已存在(无论 true/false)就跳过——不覆盖用户的选择,也不会写出
+ * 重复键;`allowBuilds:` 若写成了内联空映射(`{}`)照样能扩成块,其它内联形态则
+ * 放弃(宁可不动,也不能把 pnpm-workspace.yaml 写坏)。
+ */
+function allowBuildsAdd(home: string, profile: string, names: string[]): boolean {
+  const path = join(profileDir(home, profile), 'pnpm-workspace.yaml')
+  if (!existsSync(path)) return false
+  try {
+    const text = readFileSync(path, 'utf8')
+    // Line-based so \r\n (Windows) and \n both work — a regex relying on \n[a-z]
+    // silently fails to bound the block under CRLF.
+    const eol = text.includes('\r\n') ? '\r\n' : '\n'
+    const lines = text.split(/\r?\n/)
+    const wanted = [...new Set(names.filter(isPackageName))]
+    const missing = wanted.filter((n) => !hasAllowBuildsKey(lines, n))
+    if (missing.length === 0) return false
+    const added = missing.map((n) => `  ${allowBuildsKey(n)}: true`)
+    const idx = lines.findIndex((l) => /^allowBuilds\s*:/.test(l))
+    if (idx >= 0) {
+      const inline = lines[idx].slice(lines[idx].indexOf(':') + 1).trim()
+      if (inline === '{}' ) {
+        lines[idx] = 'allowBuilds:'
+        lines.splice(idx + 1, 0, ...added)
+      } else if (inline !== '') {
+        return false // 其它内联形态(如 `allowBuilds: [..]`)不敢乱动
+      } else {
+        // Block ends at the first following line that isn't indented (or EOF).
+        let end = idx + 1
+        while (end < lines.length && /^[ \t]/.test(lines[end])) end += 1
+        lines.splice(end, 0, ...added)
+      }
+    } else {
+      lines.push('', 'allowBuilds:', ...added)
+    }
+    writeFileSync(path, lines.join(eol))
+    return true
+  } catch {
+    /* best-effort — a malformed workspace file must not block installs */
+    return false
+  }
+}
+
 /**
  * pnpm 10 requires build-running packages to be listed under `allowBuilds:` in
  * the profile's pnpm-workspace.yaml. Git-hosted plugins that run build scripts
@@ -519,33 +578,39 @@ function depNames(home: string, profile: string): Set<string> {
  * `name@git+https://github.com/owner/repo.git` form (pnpm normalizes
  * codeload/github URLs to this via `gitHostedTarballRepoKey`). It does not
  * change between installs, unlike the hash-embedded depPath.
+ *
+ * 单个 git 仓库键的白名单(git-hosted 插件 prepare 被拦时用)。
  */
 function allowBuildsWhitelist(home: string, profile: string, gitRepoKey: string): boolean {
-  const path = join(profileDir(home, profile), 'pnpm-workspace.yaml')
-  if (!existsSync(path)) return false
-  try {
-    let text = readFileSync(path, 'utf8')
-    if (text.includes(`  ${gitRepoKey}: true`)) return false
-    // Line-based so \r\n (Windows) and \n both work — a regex relying on \n[a-z]
-    // silently fails to bound the block under CRLF.
-    const eol = text.includes('\r\n') ? '\r\n' : '\n'
-    const lines = text.split(/\r?\n/)
-    const idx = lines.findIndex((l) => /^allowBuilds\s*:/.test(l))
-    if (idx >= 0) {
-      // Block ends at the first following line that isn't indented (or EOF).
-      let end = idx + 1
-      while (end < lines.length && /^[ \t]/.test(lines[end])) end += 1
-      lines.splice(end, 0, `  ${gitRepoKey}: true`)
-    } else {
-      lines.push('', 'allowBuilds:', `  ${gitRepoKey}: true`)
-    }
-    writeFileSync(path, lines.join(eol))
-    return true
-  } catch {
-    /* best-effort — a malformed workspace file must not block installs */
-    return false
-  }
+  return allowBuildsAdd(home, profile, [gitRepoKey])
 }
+
+/** 从 pnpm 的 `Ignored build scripts: a@1, b@2 …` 报错里解析被拦的包名(去版本号)。 */
+function parseIgnoredBuildPackages(stderr: string | undefined): string[] {
+  if (!stderr) return []
+  const seg = /Ignored build scripts:([\s\S]*?)(?:\n\s*\n|\n\s*help:|$)/i.exec(stderr)?.[1] ?? ''
+  return seg
+    .split(/[,\n]/)
+    .map((s) => s.trim())
+    .filter((s) => s && !/^help:/i.test(s))
+    .map((s) => {
+      const at = s.lastIndexOf('@')
+      if (at <= 0) return s
+      if (s.startsWith('@')) return at > s.indexOf('/') ? s.slice(0, at) : s
+      return s.slice(0, at)
+    })
+    .filter(Boolean)
+}
+
+/** 标准构建白名单:dsh 核心 / 原生依赖需要 postinstall,pnpm 10+ 默认拦截。 */
+export const STANDARD_ALLOW_BUILDS = [
+  'node-llama-cpp',
+  'node-pty',
+  'koffi',
+  'protobufjs',
+  '@google/genai',
+  '@deepseek-ai/dsh-subprocess-local'
+]
 
 /**
  * Pull the repo-level allowBuilds key out of pnpm's git-prepare error. pnpm's
@@ -736,8 +801,8 @@ function rollbackFailedAdd(home: string, profile: string, before: Set<string>, s
       changed = true
       taskLine(`install:${spec}`, t(`清理失败安装的残留依赖「${n}」…`, `Cleaning up residual dependency "${n}" from failed install…`), 'stderr')
     }
-    // 残缺的 node_modules 目录(含 junction 场景,用 rmSync 兜底)。
-    rmSync(join(dir, 'node_modules', n), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+    // 残缺的 node_modules 目录(含 junction 场景;Electron 下 rmSync 会静默失败 → 安全删除)。
+    removeDirSafe(join(dir, 'node_modules', n))
     // 插件树 insert:不摘除则启动时 include-loader 仍会导入不存在的包而崩溃。
     if (removePluginInsert(home, profile, n)) changed = true
     // bundles 层:失败 add 若已登记,一并摘除。
@@ -782,7 +847,7 @@ export function removeBrokenPlugin(home: string, profile: string, name: string):
     if (profileBlock) profileBlock.bundles = bundles
     writeFileSync(file, JSON.stringify(manifest, null, 2), 'utf8')
   }
-  rmSync(join(dir, 'node_modules', name), { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
+  removeDirSafe(join(dir, 'node_modules', name))
   if (removePluginInsert(home, profile, name)) changed = true
   return changed
 }
@@ -883,6 +948,8 @@ export function repairAllProfiles(): string[] {
     for (const p of readdirSync(profilesDir)) {
       if (!existsSync(join(profilesDir, p, 'package.json'))) continue
       for (const n of repairProfilePluginRefs(home, p)) fixed.push(`${p}: ${n}`)
+      // pnpm 10+ 供应链策略:补上标准构建白名单,否则装依赖时 ERR_PNPM_IGNORED_BUILDS。
+      if (allowBuildsAdd(home, p, STANDARD_ALLOW_BUILDS)) fixed.push(`${p}: allowBuilds`)
     }
   }
   return fixed
@@ -1170,231 +1237,99 @@ export function repairProfile(home: string, profile: string): { ok: boolean; cha
   return { ok: true, changed, bundles: next }
 }
 
-/**
- * 递归删除目录内所有符号链接/junction(Windows 上 rmSync 遇到 junction 常抛
- * EPERM——junction 是重解析点,把它当目录枚举/删除会被系统拒绝)。先清链接,
- * 再删实体目录。占用中的链接跳过,交给后续 rmSync 的重试处理。
- */
-function removeLinksInside(dir: string): void {
-  let names: string[]
-  try {
-    names = readdirSync(dir)
-  } catch {
-    return
-  }
-  for (const name of names) {
-    const p = join(dir, name)
-    let st
-    try {
-      st = lstatSync(p)
-    } catch {
-      continue
-    }
-    if (st.isSymbolicLink()) {
-      try { unlinkSync(p) } catch { /* 占用中则留给 rmSync 重试 */ }
-    } else if (st.isDirectory()) {
-      removeLinksInside(p)
-    }
-  }
-}
-
-/**
- * 健壮的目录删除(Windows):先清内部 junction/symlink,再带重试 rmSync;
- * 仍被占用(如运行中的 dsh 实例持有插件文件句柄)时改名让原路径立即从本地库
- * 消失,后台再清;改名也失败才抛错。
- */
-function removeDirForce(dir: string): void {
-  if (!existsSync(dir)) return
-  removeLinksInside(dir)
-  try {
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
-    return
-  } catch {
-    // EPERM/EBUSY——目录可能被运行中的实例占用,走改名兜底。
-  }
-  // 统一改名名(固定,不带时间戳):避免反复改名时 `.deleting-` 后缀叠加累积成
-  // `.deleting-….deleting-….deleting-…` 一串(用户实际遇到过的残留)。
-  const base = basename(dir)
-  const trash = base.startsWith('.deleting-')
-    ? join(dirname(dir), `.deleting-${process.pid}`)
-    : `${dir}.deleting-${process.pid}`
-  try {
-    renameSync(dir, trash)
-    rmSync(trash, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 })
-  } catch {
-    // 改名成功 = 原路径已从本地库消失,视为移除成功;清残余失败不阻塞,交给
-    // cleanupDeletingResidue 下次清理。只有「改名本身失败」(目录仍被打开)才是真占用。
-    if (existsSync(dir)) {
-      throw new Error(t(
-        `目录被占用,无法删除 ${dir}。若插件正被运行中的实例加载,请先停止该实例再移除。`,
-        `Directory is locked and could not be removed: ${dir}. If the plugin is loaded by a running instance, stop it first.`
-      ))
-    }
-  }
-}
-
-/**
- * 删除前等文件句柄释放:反复尝试删除目录,成功即返回 true;超过重试仍被占用返回
- * false(由调用方走改名兜底 + 延时清理)。实例刚停时句柄常在 1-2s 后才释放,之前
- * 只等 400ms 就删、失败直接改名,于是留下 `.deleting-` 残留。这里把等待窗口拉长,
- * 多数锁释放后能直接删干净,不再产生残留。
- */
-async function waitUntilDeletable(dir: string, attempts = 15, delayMs = 400): Promise<boolean> {
-  for (let i = 0; i < attempts; i++) {
-    try {
-      removeLinksInside(dir)
-      rmSync(dir, { recursive: true, force: true, maxRetries: 2, retryDelay: 100 })
-      return true
-    } catch {
-      if (i < attempts - 1) await delay(delayMs)
-    }
-  }
-  return false
-}
-
-/**
- * Remove a plugin from the local library entirely: uninstall it from every
- * instance's profile (so no `file:` dependency dangles into a deleted folder),
- * then delete its source from pluginDir. Returns the affected instance ids so
- * the caller can restart the running ones.
- */
-/**
- * 清理命令行中涉及 `dir` 的残留 node/dsh/electron 进程。实例已停止但可能残留孤儿
- * 子进程(如 dsh 派生的插件进程)仍持有本地库文件句柄,导致删除 EPERM。幂等:只杀
- * 匹配进程,其余不动。仅 Windows。
- */
-function killResidualProcesses(dir: string): Promise<void> {
-  if (process.platform !== 'win32') return Promise.resolve()
-  return new Promise((resolve) => {
-    // 清掉可能持有插件文件句柄的 node/dsh/electron 进程:命令行含该目录、或含该
-    // 目录名(插件派生的子进程/孤儿进程 cwd 常落在插件目录,命令行未必含完整路径)。
-    // 只 kill 匹配进程,其余不动;幂等。
-    const base = basename(dir)
-    const ps = spawn(
-      'powershell',
-      ['-NoProfile', '-NonInteractive', '-Command',
-        `$d='${dir}'; $b='${base}'; ` +
-        `Get-CimInstance Win32_Process | Where-Object { ($_.Name -match 'node|dsh|electron') -and ($_.CommandLine -like "*$d*" -or $_.CommandLine -like "*$b*") } | ` +
-        `ForEach-Object { taskkill /F /T /PID $($_.ProcessId) }`],
-      { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] },
-    )
-    ps.on('close', () => resolve())
-    ps.on('error', () => resolve())
-  })
-}
-
-/**
- * 删除插件目录:每轮先强制释放占用(kill 持有句柄的进程)→ 等句柄释放 → force 删,
- * 然后验证目录是否真的消失。整体最多 3 轮(初始 + 2 次重试),仍残留返回 false。
- * 首轮等待窗口最长(多数锁 1-2s 释放),重试轮缩短,避免整体耗时过长「卡住」。
- */
-async function deletePluginDirWithRetry(dir: string): Promise<boolean> {
-  for (let round = 0; round < 3; round++) {
-    if (!existsSync(dir)) return true
-    await killResidualProcesses(dir)
-    const deleted = await waitUntilDeletable(dir, round === 0 ? 15 : 5, 400)
-    if (!deleted) {
-      try { removeDirForce(dir) } catch { /* 已尽力;下一轮或返回残留 */ }
-    }
-    if (!existsSync(dir)) return true
-    if (round < 2) await delay(700)
-  }
-  return false
-}
-
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-/** 本地库是否还有 `.deleting-` 残留。 */
-function hasDeletingResidue(): boolean {
-  const pluginDir = getConfig().pluginDir
-  if (!pluginDir || !existsSync(pluginDir)) return false
-  try {
-    return readdirSync(pluginDir).some((n) => n.startsWith('.deleting-'))
-  } catch {
-    return false
-  }
-}
-
-/** 清理本地库下删除改名兜底遗留的 `.deleting-*` 残留(未被占用的直接删,防累积)。 */
-function cleanupDeletingResidue(): void {
-  const pluginDir = getConfig().pluginDir
-  if (!pluginDir || !existsSync(pluginDir)) return
-  for (const entry of readdirSync(pluginDir, { withFileTypes: true })) {
-    if (!entry.isDirectory() || !entry.name.startsWith('.deleting-')) continue
-    try {
-      rmSync(join(pluginDir, entry.name), { recursive: true, force: true, maxRetries: 5, retryDelay: 400 })
-    } catch {
-      /* 仍被占用,留待下次清理 */
-    }
-  }
-}
-
-/**
- * 删除改名兜底留下的 `.deleting-` 残留,稍后异步多轮重试。
- * 删除时实例刚被停止,残留句柄可能在 1-2s 后才释放;扫描清理只跑一次,若当时还没
- * 释放就永远清不掉。这里在删除后补上延时多轮清理,句柄一释放就自动清掉残留。
- */
-async function cleanupDeletingResidueSoon(): Promise<void> {
-  for (let i = 0; i < 6; i++) {
-    await delay(1500)
-    cleanupDeletingResidue()
-    if (!hasDeletingResidue()) return
-  }
-}
-
-export async function removeFromLibrary(name: string): Promise<CmdResult> {
-  const cfg = getConfig()
-  // 先清理历史上删除改名兜底遗留的 `.deleting-*` 残留(未被占用的直接删)。
-  cleanupDeletingResidue()
-  const entry = scanLocal().find((p) => p.name === name)
-  // 完整性检定(仅在删除时触发):
-  // - entry 存在(scanLocal 认得它)= 完整插件 → 正常删除。
-  // - 目录仍在但 scanLocal 不认(部分移除/损坏,如 package.json 已丢)= 视为
-  //   残余,自动清掉,避免它一直显示在本地库或占用名字。
-  // - 目录已整体消失(此前已移除)= 按移除成功处理,不再报「找不到」。
-  const dir = entry?.path ?? join(cfg.pluginDir, name)
-  const dirExists = existsSync(dir)
-
+/** 把某个插件从所有已配置实例卸载(停挂载 + dsh plugin remove),返回受影响的实例 id。 */
+async function uninstallEverywhere(name: string): Promise<string[]> {
   const affected: string[] = []
-  for (const inst of cfg.instances) {
+  for (const inst of getConfig().instances) {
     const home = instanceDshHome(inst)
     const { installed } = listInstalled(home, inst.profile)
     if (!installed.some((p) => p.name === name)) continue
     setEnabled(home, inst.profile, name, false)
     const r = await remove(home, inst.profile, name)
-    if (r.ok) {
-      affected.push(inst.id)
-    } else {
-      // `dsh plugin remove` 失败(实例未停 / 依赖损坏 / 网络):至少把该 profile 里
-      // 对它的引用(deps + bundles + 插件树 insert)清掉,避免本地库删了之后启动
-      // 时 include-loader 还去加载一个已不存在的插件而整个 profile 崩掉。
-      removeBrokenPlugin(home, inst.profile, name)
-    }
+    if (r.ok) affected.push(inst.id)
   }
+  return affected
+}
 
-  if (dirExists) {
-    // 删除前强制释放占用(kill 持有句柄的残留进程)→ 等待句柄释放 → 验证目录真的消失。
-    // 整体最多重试 3 轮(初始 + 2 次);仍失败则返回残留状态,由渲染端弹提示让用户手动
-    // 删除,不无限重试、不卡住。
-    const deleted = await deletePluginDirWithRetry(dir)
-    // 兜底:即使走了改名仍留了 `.deleting-`,后台多轮延时清理会在句柄释放后自动清掉。
-    void cleanupDeletingResidueSoon()
-    if (!deleted) {
-      return {
-        ok: false,
-        code: 1,
-        error: t(
-          `未能删除插件文件夹: ${dir}\n可能仍被进程占用。请停止相关实例后,手动删除该文件夹。`,
-          `Could not delete plugin folder: ${dir}\nIt may still be locked by a process. Stop the related instance and delete the folder manually.`
-        ),
-        affected
-      }
+/**
+ * 本地库条目的「仓库」归属:一个仓库可能含多个插件(monorepo / 皮肤合集),
+ * 根目录本身也可能是插件(单插件仓库)。返回该仓库下的全部插件名,供删除时询问
+ * 「是否连同整个仓库一起删」。
+ */
+export function libraryRepoInfo(name: string): { repoName: string; plugins: { name: string }[] } | null {
+  const cfg = getConfig()
+  const local = scanLocal()
+  const target = local.find((p) => p.name === name)
+  if (!target || !target.path) return null
+  const rel = relative(cfg.pluginDir, target.path)
+  const first = rel.split(/[\\/]/)[0] ?? rel
+  if (!first || first.startsWith('..')) return null
+  const repoPath = join(cfg.pluginDir, first)
+  const seen = new Set<string>()
+  const plugins: { name: string }[] = []
+  for (const p of local) {
+    if (p.path !== repoPath && !p.path.startsWith(repoPath + sep)) continue
+    // 合集仓库的「根行」本身不是插件(没有 package.json,version 为空),不计入插件列表。
+    if (p.path === repoPath && !p.version) continue
+    if (seen.has(p.name)) continue
+    seen.add(p.name)
+    plugins.push({ name: p.name })
+  }
+  return plugins.length > 0 ? { repoName: first, plugins } : null
+}
+
+/** 删除整个本地库仓库:先把它名下的每个插件从所有实例卸载,再删仓库目录。 */
+export async function removeRepoFromLibrary(name: string): Promise<CmdResult> {
+  const info = libraryRepoInfo(name)
+  if (!info) {
+    return { ok: false, code: 1, error: t(`找不到本地库仓库: ${name}`, `Local library repo not found: ${name}`) }
+  }
+  const cfg = getConfig()
+  const repoPath = join(cfg.pluginDir, info.repoName)
+  const affected: string[] = []
+  for (const p of info.plugins) {
+    for (const id of await uninstallEverywhere(p.name)) if (!affected.includes(id)) affected.push(id)
+  }
+  if (!removeDirSafe(repoPath)) {
+    return {
+      ok: false,
+      code: 1,
+      error: t(
+        `未能删除仓库文件夹: ${repoPath}\n它可能仍被进程占用。请停止相关实例后重试,或手动删除该文件夹。`,
+        `Could not delete the repo folder: ${repoPath}\nIt may still be locked by a process. Stop the related instance and retry, or delete the folder manually.`
+      ),
+      affected
     }
   }
-  // 插件已从本地库移除(或本就已移除),连同它的显示名/备注一并清掉,
-  // 避免「插件删了、名字还留在上面」的残留(此前推荐整合包功能遗留过这个问题)。
+  for (const p of info.plugins) {
+    if (cfg.pluginMeta?.[p.name]) setPluginMeta(p.name, { displayName: '', remark: '' })
+  }
+  return { ok: true, code: 0, affected }
+}
+
+export async function removeFromLibrary(name: string): Promise<CmdResult> {
+  const cfg = getConfig()
+  // 目录定位:集合仓库(monorepo)的子包行真实路径在 `repo/子包`,由 scanLocal 提供;
+  // 找不到条目时退回 `pluginDir/<name>`。
+  const entry = scanLocal().find((p) => p.name === name)
+  const dir = entry?.path ?? join(cfg.pluginDir, name)
+  const affected = await uninstallEverywhere(name)
+  if (!removeDirSafe(dir)) {
+    return {
+      ok: false,
+      code: 1,
+      error: t(
+        `未能删除插件文件夹: ${dir}\n它可能仍被进程占用。请停止相关实例后重试,或手动删除该文件夹。`,
+        `Could not delete plugin folder: ${dir}\nIt may still be locked by a process. Stop the related instance and retry, or delete the folder manually.`
+      ),
+      affected
+    }
+  }
+  // 插件已从本地库移除,连同它的显示名/备注一并清掉。
   if (cfg.pluginMeta?.[name]) setPluginMeta(name, { displayName: '', remark: '' })
   return { ok: true, code: 0, affected }
 }

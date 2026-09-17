@@ -473,6 +473,10 @@ export interface DshLauncherApi {
   removeFromLibrary(name: string): Promise<CmdResult>
   /** Remove several plugins from the local library in one go (批量删除本地插件): delete each source folder and uninstall it from every instance. */
   removeFromLibraryMany(names: string[]): Promise<CmdResult>
+  /** 本地库条目的仓库归属(一个仓库可能含多个插件);找不到时返回 null。 */
+  libraryRepoInfo(name: string): Promise<{ repoName: string; plugins: { name: string }[] } | null>
+  /** 删除整个本地库仓库:卸载并删除它名下的全部插件。 */
+  removeRepoFromLibrary(name: string): Promise<CmdResult>
   repairDeps(): Promise<CmdResult>
   rebuild(): Promise<CmdResult>
   /** Clone/update the harness repo, install deps, then auto-configure paths. */
