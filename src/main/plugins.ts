@@ -5,11 +5,11 @@ import { basename, delimiter, dirname, join, relative, resolve, sep } from 'node
 import * as yaml from 'js-yaml'
 import { net } from 'electron'
 import { getConfig, setConfig } from './config'
-import { removeDirSafe } from './fs-safe'
+import { removeDirSafe, removeDirSafeSync } from './fs-safe'
 import { addInstance, getActiveInstance, instanceDshHome } from './instances'
 import { t } from './i18n'
 import { bundledEnv, downloadFile, extractZip, progressLine, resolveBundledNode } from './runtime'
-import { runAsync, taskDone, taskLine, taskProgress } from './task'
+import { outputOf, runAsync, taskDone, taskLine, taskProgress } from './task'
 import { bundleTaskLabel, RECOMMENDED_BUNDLES } from '../shared/bundles'
 import { parseGitHubUrl } from '../shared/github'
 import { classifyPnpmFailure, pluginArgsFor } from './pnpm-compat'
@@ -215,12 +215,40 @@ async function runPluginCommand(home: string, profile: string, extra: string[], 
   const ok = (r: CmdResult): boolean => r.ok
   let r = await runOnce(extra)
   if (ok(r)) return r
-  const output = r.stderr ?? ''
+  // pnpm 的错误报告有的走 stderr、有的走 stdout(如 ERR_PNPM_UNEXPECTED_STORE),
+  // 分类必须看两条流,否则会漏掉一半陷阱。
+  const output = outputOf(r)
   const failure = classifyPnpmFailure(output)
   if (failure?.code === 'hoist-pattern-diff') {
     taskLine(label, t('[install] node_modules 由旧版 pnpm 创建,正在重建后重试…', '[install] node_modules was created by a different pnpm major; rebuilding and retrying…'), 'stderr')
     await runOnce(['install', '--no-frozen-lockfile'])
     r = await runOnce(extra)
+  } else if (failure?.code === 'unexpected-store' && (extra[0] === 'add' || extra[0] === 'remove')) {
+    // node_modules 记录的 store 和 pnpm 现在要用的不是同一个 → pnpm 拒绝一切装/卸。
+    // 修法:把「它记录的那个 store」重新喂给 pnpm —— 双方立刻一致,零下载。
+    // 顺序很关键:先用临时参数重试,**成功之后**才把 store 钉进 profile 的
+    // pnpm-workspace.yaml(storeDir)。反过来先落盘的话,一旦这个 store 是别的 pnpm
+    // 大版本的、pnpm 根本用不了,我们就在用户配置里留下了一个没用的绝对路径。
+    // (pnpm 报错里建议的 `pnpm install` 修不好:实测 node_modules 已最新时它是空操作,
+    //  记录原样不动。)
+    const storeDir = recordedStoreDir(home, profile) ?? failure.linkedStore
+    if (storeDir && existsSync(storeDir)) {
+      taskLine(label, t(`[install] 该 profile 的 node_modules 链接的 store 与当前默认不一致,正在按它记录的 store(${storeDir})重试…`, `[install] This profile's node_modules is linked to a different pnpm store; retrying against the recorded store (${storeDir})…`), 'stderr')
+      const retried = await runOnce([...extra, '--store-dir', storeDir])
+      if (ok(retried)) {
+        r = retried
+        taskLine(label, pinProfileStoreDir(home, profile, storeDir)
+          ? t('[install] 已把这个 store 记进该 profile 的 pnpm-workspace.yaml,以后再装/卸插件不会再遇到这个问题。', '[install] Recorded that store in this profile\'s pnpm-workspace.yaml; future installs/uninstalls won\'t hit this again.')
+          : t('[install] 该 store 已生效,但没能写进 pnpm-workspace.yaml —— 下次遇到时会再自动对齐一次。', '[install] The store is in effect, but could not be written to pnpm-workspace.yaml — the next run will re-align again.'), 'stderr')
+      } else {
+        r = retried
+      }
+    }
+    // 记录的 store 已不存在 → 不动手(那会让 pnpm 新建空 store 并把整棵依赖树重下一遍),
+    // 交给下面的诚实报错。
+    else if (storeDir) {
+      taskLine(label, t(`[install] 该 profile 记录的 pnpm store 目录已不存在(${storeDir}),未自动对齐 —— 需要删除该 profile 的 node_modules 后重新安装`, `[install] The pnpm store recorded for this profile no longer exists (${storeDir}); not auto-realigning — the profile's node_modules must be deleted and reinstalled`), 'stderr')
+    }
   } else if (failure?.code === 'release-age-violation' && (extra[0] === 'add' || extra[0] === 'remove')) {
     taskLine(label, t('[install] pnpm 安全等待期拦截,正在放行重试…', '[install] pnpm fresh-release hold; bypassing and retrying…'), 'stderr')
     r = await runOnce([extra[0], '--config.minimumReleaseAge=0', ...extra.slice(1)])
@@ -270,6 +298,66 @@ async function runPluginCommand(home: string, profile: string, extra: string[], 
     r = { ...r, error: failure.message }
   }
   return r
+}
+
+/**
+ * 该 profile 的 node_modules 是「从哪个 pnpm store 链接出来的」——
+ * pnpm 把它记在 `node_modules/.modules.yaml` 的 `storeDir`。这是判断 store 不一致时
+ * 该往哪个 store 对齐的**权威来源**(比解析错误文本可靠)。任何异常都返回 null。
+ */
+function recordedStoreDir(home: string, profile: string): string | null {
+  const file = join(profileDir(home, profile), 'node_modules', '.modules.yaml')
+  let raw: string
+  try {
+    raw = readFileSync(file, 'utf8').replace(/^\uFEFF/, '')
+  } catch {
+    return null
+  }
+  // pnpm 是用 JSON.stringify 写这个文件的 → 先按 JSON 严格解析(语义与写方一致);
+  // 失败再退回 YAML(将来 pnpm 若改写真 YAML 也能读)。
+  let parsed: unknown = null
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    try {
+      parsed = yaml.load(raw)
+    } catch {
+      return null
+    }
+  }
+  const dir = (parsed as { storeDir?: unknown } | null)?.storeDir
+  if (typeof dir !== 'string' || !dir.trim()) return null
+  // 必须是绝对路径:相对路径喂给 pnpm 只会解析到别处。
+  return /^(?:[A-Za-z]:[\\/]|[\\/])/.test(dir) ? dir : null
+}
+
+/**
+ * 把指定的 pnpm store 钉进 profile 的 `pnpm-workspace.yaml`(键 `storeDir`)。
+ * pnpm ≥10 从这份文件读设置(实测 `.npmrc` 已不被读取),所以这里是唯一能生效的位置。
+ * 采用**文本级**追加/替换(与 `ensureProfilePnpmSettings` 同一风格),不重新 dump,
+ * 以免抹掉用户自己写的注释与键。返回是否写入成功。
+ */
+function pinProfileStoreDir(home: string, profile: string, storeDir: string): boolean {
+  const file = join(profileDir(home, profile), 'pnpm-workspace.yaml')
+  // 不创建这个文件:它的有无会让 `pluginArgsFor` 决定是否给 add/remove 注入 `-w`,
+  // 凭空造一个会改变该 profile 的其它行为(与 ensureProfilePnpmSettings 的"文件不存在就跳过"一致)。
+  if (!existsSync(file)) return false
+  try {
+    // 单引号内的反斜杠是字面量,正好适合 Windows 路径;不重新 dump,免得抹掉用户的注释与键。
+    const line = `storeDir: '${storeDir.replace(/'/g, "''")}'`
+    let text = readFileSync(file, 'utf8')
+    if (/^[ \t]*(?:storeDir|store-dir)\s*:/m.test(text)) {
+      // 已有该键(值不对才会走到这里)→ 原地替换
+      text = text.replace(/^[ \t]*(?:storeDir|store-dir)\s*:.*$/m, line)
+    } else {
+      if (!text.endsWith('\n')) text += '\n'
+      text += `${line}\n`
+    }
+    writeFileSync(file, text, 'utf8')
+    return true
+  } catch {
+    return false
+  }
 }
 
 // --- reads ---
@@ -726,7 +814,7 @@ export async function install(home: string, profile: string, spec: string, name?
     // in the profile's allowBuilds whitelist. Self-heal: whitelist the package
     // and retry once. Without this, such plugins permanently fail to install.
     if (!r.ok) {
-      const blocked = parseAllowBuildsKey(r.stderr)
+      const blocked = parseAllowBuildsKey(outputOf(r))
       if (blocked && allowBuildsWhitelist(home, profile, blocked)) {
         taskLine(label, t(`检测到 pnpm allowBuilds 白名单缺失,已加入 ${blocked} 并重试…`, `Detected missing allowBuilds whitelist entry; added ${blocked} and retrying…`), 'stderr')
         r = await runPluginCommand(home, profile, ['add', target, ...(flags ?? [])], label, env)
@@ -801,8 +889,8 @@ function rollbackFailedAdd(home: string, profile: string, before: Set<string>, s
       changed = true
       taskLine(`install:${spec}`, t(`清理失败安装的残留依赖「${n}」…`, `Cleaning up residual dependency "${n}" from failed install…`), 'stderr')
     }
-    // 残缺的 node_modules 目录(含 junction 场景;Electron 下 rmSync 会静默失败 → 安全删除)。
-    removeDirSafe(join(dir, 'node_modules', n))
+    // 残缺的 node_modules 目录(含 junction 场景 → 安全删除;此处是同步自愈路径,用同步版)。
+    removeDirSafeSync(join(dir, 'node_modules', n))
     // 插件树 insert:不摘除则启动时 include-loader 仍会导入不存在的包而崩溃。
     if (removePluginInsert(home, profile, n)) changed = true
     // bundles 层:失败 add 若已登记,一并摘除。
@@ -847,7 +935,7 @@ export function removeBrokenPlugin(home: string, profile: string, name: string):
     if (profileBlock) profileBlock.bundles = bundles
     writeFileSync(file, JSON.stringify(manifest, null, 2), 'utf8')
   }
-  removeDirSafe(join(dir, 'node_modules', name))
+  removeDirSafeSync(join(dir, 'node_modules', name))
   if (removePluginInsert(home, profile, name)) changed = true
   return changed
 }
@@ -1294,13 +1382,14 @@ export async function removeRepoFromLibrary(name: string): Promise<CmdResult> {
   for (const p of info.plugins) {
     for (const id of await uninstallEverywhere(p.name)) if (!affected.includes(id)) affected.push(id)
   }
-  if (!removeDirSafe(repoPath)) {
+  const repoDel = await removeDirSafe(repoPath)
+  if (!repoDel.ok) {
     return {
       ok: false,
       code: 1,
       error: t(
-        `未能删除仓库文件夹: ${repoPath}\n它可能仍被进程占用。请停止相关实例后重试,或手动删除该文件夹。`,
-        `Could not delete the repo folder: ${repoPath}\nIt may still be locked by a process. Stop the related instance and retry, or delete the folder manually.`
+        `未能删除仓库文件夹: ${repoPath}\n原因: ${repoDel.error ?? '未知错误'}\n请停止相关实例后重试,或手动删除该文件夹。`,
+        `Could not delete the repo folder: ${repoPath}\nReason: ${repoDel.error ?? 'unknown error'}\nStop the related instance and retry, or delete the folder manually.`
       ),
       affected
     }
@@ -1318,13 +1407,14 @@ export async function removeFromLibrary(name: string): Promise<CmdResult> {
   const entry = scanLocal().find((p) => p.name === name)
   const dir = entry?.path ?? join(cfg.pluginDir, name)
   const affected = await uninstallEverywhere(name)
-  if (!removeDirSafe(dir)) {
+  const del = await removeDirSafe(dir)
+  if (!del.ok) {
     return {
       ok: false,
       code: 1,
       error: t(
-        `未能删除插件文件夹: ${dir}\n它可能仍被进程占用。请停止相关实例后重试,或手动删除该文件夹。`,
-        `Could not delete plugin folder: ${dir}\nIt may still be locked by a process. Stop the related instance and retry, or delete the folder manually.`
+        `未能删除插件文件夹: ${dir}\n原因: ${del.error ?? '未知错误'}\n请停止相关实例后重试,或手动删除该文件夹。`,
+        `Could not delete plugin folder: ${dir}\nReason: ${del.error ?? 'unknown error'}\nStop the related instance and retry, or delete the folder manually.`
       ),
       affected
     }
@@ -1419,7 +1509,9 @@ export async function ensureRuntimeLinks(home: string, profile: string): Promise
   } catch {
     /* pluginDir/node_modules 尚不存在 → 直接创建 */
   }
-  if (occupied) rmSync(link, { recursive: true, force: true })
+  // 注意:link 本身通常就是个 junction —— 裸 rmSync 会穿透它把**目标目录的内容删光**
+  // (实测),所以这里必须走安全删除:是链接就只摘链接,是实目录则先摘内部链接。
+  if (occupied) await removeDirSafe(link)
   mkdirSync(dirname(link), { recursive: true })
   try {
     if (process.platform === 'win32') {
@@ -1902,7 +1994,7 @@ export async function downloadHarness(): Promise<CmdResult> {
   taskProgress(label, 0.1, t('拉取最新代码…', 'Fetching latest code…'))
   const gitEnv = gitEnvFor(git.exe)
 
-  if (isIncompleteGitDir(target)) rmSync(target, { recursive: true, force: true })
+  if (isIncompleteGitDir(target)) await removeDirSafe(target)
   const isGit = existsSync(join(target, '.git'))
   if (isGit) {
     const pull = await runAsync(git.exe, ['-C', target, 'pull', '--ff-only'], process.cwd(), label, false, gitEnv, GIT_TIMEOUT_MS)
@@ -1914,7 +2006,7 @@ export async function downloadHarness(): Promise<CmdResult> {
     const clone = await runAsync(git.exe, cloneArgs(authedCloneUrl(url, cfg.githubToken), target), process.cwd(), label, false, gitEnv, GIT_TIMEOUT_MS, cfg.githubToken)
     if (!clone.ok) {
       // Wipe the partial clone (may only contain `.git`) so a retry starts fresh.
-      rmSync(target, { recursive: true, force: true })
+      await removeDirSafe(target)
       taskDone(label, clone.code ?? 1)
       return clone
     }
@@ -1984,7 +2076,7 @@ export async function downloadPlugin(url: string, subdir?: string, _profile?: st
 
   if (!existsSync(cfg.pluginDir)) mkdirSync(cfg.pluginDir, { recursive: true })
 
-  if (isIncompleteGitDir(target)) rmSync(target, { recursive: true, force: true })
+  if (isIncompleteGitDir(target)) await removeDirSafe(target)
   if (existsSync(join(target, '.git'))) {
     const pull = await runAsync(git.exe, ['-C', target, 'pull', '--ff-only'], process.cwd(), label, false, gitEnv, GIT_TIMEOUT_MS)
     if (!pull.ok) taskLine(label, t('[download] 拉取未完成,使用现有代码。', '[download] Pull incomplete; using existing code.'), 'stderr')
@@ -1992,7 +2084,7 @@ export async function downloadPlugin(url: string, subdir?: string, _profile?: st
     const clone = await runAsync(git.exe, cloneArgs(authedCloneUrl(gh.cloneUrl, cfg.githubToken), target, gh.ref), process.cwd(), label, false, gitEnv, GIT_TIMEOUT_MS, cfg.githubToken)
     if (!clone.ok) {
       // Wipe the partial clone (may only contain `.git`) so a retry starts fresh.
-      rmSync(target, { recursive: true, force: true })
+      await removeDirSafe(target)
       taskDone(label, clone.code ?? 1)
       return clone
     }

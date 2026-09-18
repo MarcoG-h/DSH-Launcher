@@ -13,7 +13,6 @@ import * as plugins from './plugins'
 import * as runtime from './runtime'
 import * as popup from './popup'
 import * as security from './security'
-import { registerEmbeddedView } from './webview'
 import type { DshInstance, MarketSourceId, NewInstanceInput, PluginMeta } from '../shared/types'
 
 /** Broadcast the instance list so the renderer and tray light stay in sync. */
@@ -23,7 +22,6 @@ function broadcastInstances(): void {
 }
 
 export function registerIpc(): void {
-  registerEmbeddedView()
   ipcMain.handle('state:get', () => ({
     states: harness.getAllStates(),
     logs: harness.getAllLogs(),

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen, shell } from 'electron'
+import { app, BrowserWindow, screen } from 'electron'
 import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,6 +14,7 @@ import * as runtime from './runtime'
 import { ensureShortcuts } from './shortcuts'
 import { preloadPath } from './preload'
 import { hideToTray, initTray, markQuitting, showLauncher } from './tray'
+import { openExternalLinks } from './webview'
 
 const here = dirname(fileURLToPath(import.meta.url))
 
@@ -94,10 +95,8 @@ function createWindow(): BrowserWindow {
     if (hideToTray()) e.preventDefault()
   })
   win.on('ready-to-show', () => win.show())
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
-    return { action: 'deny' }
-  })
+  // 启动器自身界面里的外链:同样交给系统浏览器,只放行 http(s)(见 webview.ts)。
+  openExternalLinks(win.webContents)
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)

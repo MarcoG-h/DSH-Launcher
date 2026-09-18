@@ -8,9 +8,10 @@
 // wrong coordinates. A WebContentsView is a first-class child of the window's
 // content view, so keyboard focus and IME work natively.
 
-import { BrowserWindow, shell, WebContentsView, type WebContents } from 'electron'
+import { BrowserWindow, WebContentsView, type WebContents } from 'electron'
 import { consumeInstanceAuthUrl, getInstanceAuthUrl, getState, onInstanceAuthUrl } from './harness'
 import { broadcast } from './bus'
+import { openExternalLinks } from './webview'
 
 const SIDEBAR_EXPANDED = 212
 const SIDEBAR_COLLAPSED = 56
@@ -222,6 +223,10 @@ function ensureViewFor(instanceId: string): WebContentsView | null {
     v = new WebContentsView({
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
     })
+    // 外链(插件塞进 dsh 页面的跳转按钮等)一律走系统浏览器标签页,不要弹裸 Electron 窗口。
+    // 注意:必须在这里显式挂 —— Electron 43 的 WebContentsView 报 getType()==='window',
+    // 以前那个按类型过滤的全局钩子根本匹配不到它(见 webview.ts 的说明)。
+    openExternalLinks(v.webContents)
     win.contentView.addChildView(v)
     views.set(instanceId, v)
     // A fresh view lands on top of the existing stack — let the orb move back up.
@@ -279,10 +284,7 @@ function openWebChatWindow(url: string): void {
   webChatWindow = w
   w.loadURL(url)
   // 网页里的外链用系统浏览器打开,不让它替换对话窗口本身。
-  w.webContents.setWindowOpenHandler(({ url: u }) => {
-    if (/^https?:/i.test(u)) void shell.openExternal(u)
-    return { action: 'deny' }
-  })
+  openExternalLinks(w.webContents)
   w.on('closed', () => { webChatWindow = null })
 }
 

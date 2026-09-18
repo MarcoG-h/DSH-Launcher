@@ -27,6 +27,10 @@ export interface PnpmFailure {
   message: string
   /** true = 重跑 `pnpm install` 是文档记载的恢复方式。 */
   recoverable: boolean
+  /** unexpected-store:node_modules 当前链接到的 store(vs. pnpm 现在想用的那个)。 */
+  linkedStore?: string
+  /** unexpected-store:pnpm 当前配置想使用的 store。 */
+  wantedStore?: string
 }
 
 /** 瞬时网络失败——值得且只值得自动重试一次(#83)。 */
@@ -57,7 +61,9 @@ export function classifyPnpmFailure(output: string): PnpmFailure | null {
     return {
       code: 'unexpected-store',
       recoverable: false,
-      message: `这个 profile 的 node_modules 链接到的 pnpm store,和当前 pnpm 默认使用的不是同一个,pnpm 因此拒绝所有安装与卸载。${detail}\n在 profile 目录执行一次 \`pnpm install --store-dir <上面第一个路径>\` 重新链接即可(必要时先退出 dsh) / this profile\'s node_modules is linked to a different pnpm store, so pnpm refuses every install and uninstall.${detail}\nRelink by running \`pnpm install --store-dir <the first path above>\` once in the profile directory`,
+      linkedStore: linked,
+      wantedStore: wanted,
+      message: `这个 profile 的 node_modules 链接到的 pnpm store,和当前 pnpm 默认使用的不是同一个,pnpm 因此拒绝所有安装与卸载。启动器会按它记录的 store 自动重新对齐(写进该 profile 的 pnpm-workspace.yaml 的 storeDir)。若仍报此错,说明记录的 store 目录已不存在 —— 删掉该 profile 的 node_modules 后重新安装即可,已装插件与配置不受影响。${detail} / this profile\'s node_modules is linked to a different pnpm store, so pnpm refuses every install and uninstall. The launcher re-aligns to the store recorded in node_modules (via storeDir in the profile\'s pnpm-workspace.yaml). If this error persists, that store directory is gone — delete the profile\'s node_modules and reinstall; installed plugins and config are unaffected.${detail}`,
     }
   }
   if (output.includes('ERR_PNPM_ADDING_TO_ROOT')) {

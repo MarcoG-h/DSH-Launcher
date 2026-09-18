@@ -349,18 +349,18 @@ export async function removeInstance(id: string): Promise<LauncherConfig> {
 
   // —— 真正清理磁盘(仅删「该实例专属、且确认无共享」的数据,防误删其余实例) ——
   // 用 removeDirSafe:这些目录里普遍带 junction(profile/node_modules → 回退层),
-  // Electron 下裸 rmSync 会静默不删、留下「孤儿 home」(此前实际发生过)。
+  // Electron 下裸 rmSync 会穿透链接删掉目标内容,且同步版没有重试会误报占用。
   try {
     // 1) workspace(实例专属 runtimeRoot/workspaces/<id>),删除绝对安全。
-    if (inst.workspace) removeDirSafe(inst.workspace)
+    if (inst.workspace) await removeDirSafe(inst.workspace)
     // 2) profile 目录:仅当「没有其他实例」在该 home 使用同名 profile 时才删。
     //    共享 home 下多个实例可能共用同一 profile,删了会让其余实例 boot 失败——
     //    这是此前误删导致全部实例损坏的根源。
     const home = instanceDshHome(inst)
     const sharedElsewhere = instances.some(o => instanceDshHome(o) === home && o.profile === inst.profile)
-    if (!sharedElsewhere) removeDirSafe(profileDir(home, inst.profile))
+    if (!sharedElsewhere) await removeDirSafe(profileDir(home, inst.profile))
     // 3) 独立 home(实例专属 runtimeRoot/homes/<id>):UI 删除前已二次确认,此处直接清理。
-    if (inst.dshHome) removeDirSafe(inst.dshHome)
+    if (inst.dshHome) await removeDirSafe(inst.dshHome)
   } catch {
     // 删除失败(文件被占用等)不阻断配置移除——残留由用户自行决定是否手动清理。
   }

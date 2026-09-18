@@ -10,7 +10,8 @@ import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { getConfig, setConfig } from './config'
 import { t } from './i18n'
-import { runAsync, taskDone, taskLine, taskProgress } from './task'
+import { outputOf, runAsync, taskDone, taskLine, taskProgress } from './task'
+import { removeDirSafe } from './fs-safe'
 import type { CmdResult } from '../shared/types'
 
 // Timeouts for the portable-install steps so a slow or hung child (tar / npm on
@@ -474,7 +475,8 @@ export async function installRuntime(): Promise<CmdResult> {
       taskDone(label, 1)
       return { ok: false, code: 1, error: t('Node 解压失败(请检查磁盘空间 / 网络)', 'Failed to extract Node (check disk space / network)') }
     }
-    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true })
+    // 安全删除:旧运行时目录里可能带链接(裸 rmSync 会穿透链接删掉目标内容)。
+    if (existsSync(dir)) await removeDirSafe(dir)
     renameSync(inner, dir)
     rmSync(stage, { recursive: true, force: true })
     rmSync(zip, { force: true })
@@ -578,7 +580,7 @@ export async function updateRuntime(): Promise<CmdResult> {
       taskDone(label, r.code ?? 1)
       // 常见:官方发布新版 dsh 时依赖(如 dsh-native-command)还没同步发布,导致
       // pnpm NO_MATCHING_VERSION。给出清晰提示,替代晦涩的 pnpm 报错,可稍后重试。
-      if (/NO_MATCHING_VERSION|No matching version/i.test(r.stderr ?? '')) {
+      if (/NO_MATCHING_VERSION|No matching version/i.test(outputOf(r))) {
         const friendly = t(
           `新版 dsh(${dshVer})的某个依赖尚未发布完整(官方发布顺序错位)。请稍后重试,或先保持当前版本。`,
           `The new dsh (${dshVer}) has a dependency that isn't fully published yet (official release ordering). Retry later, or keep the current version.`

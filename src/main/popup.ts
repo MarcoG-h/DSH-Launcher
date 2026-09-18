@@ -8,12 +8,13 @@
 // It loads the page directly from the harness, so no preload / IPC is needed —
 // it is a plain web window pointed at dsh.
 
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { broadcast, getWindow, onEvent } from './bus'
 import { getState } from './harness'
 import { getInstance } from './instances'
+import { openExternalLinks } from './webview'
 
 const popups = new Map<string, BrowserWindow>()
 
@@ -63,10 +64,8 @@ export function openInstanceWindow(instanceId: string): void {
   // The instance name in the title is what tells several popups apart on a
   // multi-screen setup — don't let the dsh page replace it with its own title.
   win.on('page-title-updated', (e) => e.preventDefault())
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
-    return { action: 'deny' }
-  })
+  // 页面(含插件注入的跳转按钮)里的外链一律走系统浏览器标签页。
+  openExternalLinks(win.webContents)
   void win.loadURL(`http://127.0.0.1:${st.port}`)
   win.on('closed', () => {
     if (popups.get(instanceId) === win) popups.delete(instanceId)

@@ -4,7 +4,7 @@
 // data-flow events; all reading/monitoring happens here in the launcher.
 
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { removeDirSafe } from './fs-safe'
+import { removeDirSafeSync } from './fs-safe'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import { getConfig, setConfig } from './config'
@@ -248,8 +248,8 @@ function cleanLegacyProbe(home: string, profile: string): void {
     /* 忽略 */
   }
   try {
-    // 探针目录里可能有链接(Electron 下裸 rmSync 会静默不删),统一走安全删除。
-    removeDirSafe(join(home, 'profiles', profile, 'node_modules', 'dsh-audit'))
+    // 探针目录里可能有链接(裸 rmSync 会穿透链接删目标),统一走安全删除(此处为同步自愈路径)。
+    removeDirSafeSync(join(home, 'profiles', profile, 'node_modules', 'dsh-audit'))
   } catch {
     /* 忽略 */
   }

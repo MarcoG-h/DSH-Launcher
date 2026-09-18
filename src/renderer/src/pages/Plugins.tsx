@@ -438,7 +438,7 @@ export function Plugins(): JSX.Element {
             )}
             {error && (
               <div className="mt-2 flex items-start justify-between gap-2 text-[12px]" style={{ color: 'var(--err)' }}>
-                <p className="select-text break-all">{error}</p>
+                <p className="select-text break-all whitespace-pre-wrap">{error}</p>
                 <CopyButton text={error} />
               </div>
             )}
@@ -810,7 +810,7 @@ function PluginDetailModal({
 
         {err && (
           <div className="mt-3 flex items-start justify-between gap-2 text-[12px]" style={{ color: 'var(--err)' }}>
-            <p className="select-text break-all">{err}</p>
+            <p className="select-text break-all whitespace-pre-wrap">{err}</p>
             <CopyButton text={err} />
           </div>
         )}

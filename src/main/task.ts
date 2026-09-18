@@ -23,6 +23,15 @@ export function taskDone(label: string, code: number): void {
   broadcast({ type: 'task', task: { label, status: 'end', code } })
 }
 
+/**
+ * 一次运行的完整输出(stderr + stdout 尾部)。pnpm 的错误报告有的走 stderr、有的走
+ * stdout(如 ERR_PNPM_UNEXPECTED_STORE),任何"识别错误 / 解析报错内容"的地方都该用它,
+ * 而不是只看 stderr。
+ */
+export function outputOf(r: CmdResult): string {
+  return `${r.stderr ?? ''}\n${r.stdout ?? ''}`
+}
+
 function formatElapsed(s: number): string {
   if (s < 60) return t(`${s} 秒`, `${s} sec`)
   const m = Math.floor(s / 60)
@@ -61,11 +70,21 @@ export function runAsync(cmd: string, args: string[], cwd: string, label: string
     // ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED names the offending package). No
     // stderr is shown in the UI, only attached to the CmdResult.
     let stderrTail = ''
-    const STDERR_CAP = 8192
+    // pnpm 的某些错误报告(如 ERR_PNPM_UNEXPECTED_STORE)打在 **stdout** 上,只留 stderr
+    // 会让分类器完全看不见它们,所以两条流都留尾部(同样 ~8k)。UI 里两条流本来就都显示。
+    let stdoutTail = ''
+    const TAIL_CAP = 8192
     const appendStderr = (text: string): void => {
-      stderrTail = (stderrTail + text).slice(-STDERR_CAP)
+      stderrTail = (stderrTail + text).slice(-TAIL_CAP)
     }
-    const withStderr = (r: CmdResult): CmdResult => (stderrTail ? { ...r, stderr: stderrTail } : r)
+    const appendStdout = (text: string): void => {
+      stdoutTail = (stdoutTail + text).slice(-TAIL_CAP)
+    }
+    const withStderr = (r: CmdResult): CmdResult => ({
+      ...r,
+      ...(stderrTail ? { stderr: stderrTail } : {}),
+      ...(stdoutTail ? { stdout: stdoutTail } : {})
+    })
     const finish = (result: CmdResult): void => {
       if (settled) return
       settled = true
@@ -116,6 +135,7 @@ export function runAsync(cmd: string, args: string[], cwd: string, label: string
 
     child.stdout?.on('data', (c) => {
       touch()
+      appendStdout(c.toString('utf8'))
       emit('stdout')(c)
     })
     child.stderr?.on('data', (c) => {

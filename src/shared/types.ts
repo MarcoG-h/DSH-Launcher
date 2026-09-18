@@ -226,6 +226,12 @@ export interface CmdResult {
   error?: string
   /** Tail of the child process's stderr (last ~8k chars), for diagnosing failures. */
   stderr?: string
+  /**
+   * Tail of the child process's stdout (last ~8k chars). pnpm prints some error
+   * reports (e.g. ERR_PNPM_UNEXPECTED_STORE) on **stdout**, so classifiers must
+   * look at both streams — keeping only stderr silently missed them.
+   */
+  stdout?: string
   /** When a repo ships several plugin packages (e.g. skins in subdirs), the caller can choose one. */
   packages?: PluginSubPackage[]
   /** Instance ids affected by a cross-instance operation (e.g. removeFromLibrary). */
