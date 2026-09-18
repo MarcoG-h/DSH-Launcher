@@ -8,9 +8,11 @@ import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmS
 import { get as httpsGet } from 'node:https'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
+import * as yaml from 'js-yaml'
 import { getConfig, setConfig } from './config'
 import { t } from './i18n'
 import { outputOf, runAsync, taskDone, taskLine, taskProgress } from './task'
+import { STANDARD_ALLOW_BUILDS } from './pnpm-compat'
 import { removeDirSafe } from './fs-safe'
 import type { CmdResult } from '../shared/types'
 
@@ -36,6 +38,46 @@ export function nodeExe(): string {
 
 export function dshInstallDir(): string {
   return join(getConfig().runtimeRoot, 'dsh')
+}
+
+/**
+ * 给内置 dsh 的安装目录写 pnpm-workspace.yaml(含 allowBuilds 白名单)。
+ *
+ * 为什么必须有:全新机器的一键安装会现装一份**最新版 pnpm**(`npm i -g pnpm` 不锁版本),
+ * 而 pnpm 12 起只认 pnpm-workspace.yaml 里的 `allowBuilds`,`--config.strictDepBuilds=false`
+ * 这类命令行绕过**已经失效**(2026-09-18 实测:pnpm 12.4.2 + 该 flag → `ERR_PNPM_IGNORED_BUILDS`;
+ * 同一 flag 在 pnpm 11.21 上有效,所以老机器/维护者机器上复现不出来)。dsh 的核心依赖
+ * (koffi / node-pty / protobufjs / @google/genai / @deepseek-ai/dsh-subprocess-local)
+ * 都需要 postinstall,少了白名单这一步,新用户第一次「一键安装运行环境」100% 失败。
+ * 已存在则合并(保留 pnpm 自己写入的 minimumReleaseAgeExclude 等键)。
+ */
+function ensureInstallAllowBuilds(dshDir: string): void {
+  const file = join(dshDir, 'pnpm-workspace.yaml')
+  let doc: Record<string, unknown> = {}
+  try {
+    const parsed = existsSync(file) ? (yaml.load(readFileSync(file, 'utf8')) as unknown) : null
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) doc = parsed as Record<string, unknown>
+  } catch {
+    /* 损坏则重写 */
+  }
+  if (!Array.isArray(doc.packages)) doc.packages = ['.']
+  const allow = (doc.allowBuilds && typeof doc.allowBuilds === 'object' && !Array.isArray(doc.allowBuilds))
+    ? (doc.allowBuilds as Record<string, unknown>)
+    : {}
+  let changed = !existsSync(file)
+  for (const name of STANDARD_ALLOW_BUILDS) {
+    if (allow[name] !== true) {
+      allow[name] = true
+      changed = true
+    }
+  }
+  doc.allowBuilds = allow
+  if (!changed) return
+  try {
+    writeFileSync(file, yaml.dump(doc, { noRefs: true, lineWidth: -1 }), 'utf8')
+  } catch {
+    /* 写不了就让 pnpm 按原样走,失败会照常报错 */
+  }
 }
 
 export function dshBin(): string {
@@ -508,6 +550,8 @@ export async function installRuntime(): Promise<CmdResult> {
   }
   taskLine(label, t(`[runtime] 安装 @deepseek-ai/dsh@${dshVer}(含全部内置插件)…`, `[runtime] Installing @deepseek-ai/dsh@${dshVer} (with all built-in plugins)…`))
   taskProgress(label, 0.5, t(`安装 @deepseek-ai/dsh@${dshVer}(体积较大,请稍候)`, `Installing @deepseek-ai/dsh@${dshVer} (large download, please wait)`))
+  // 必须先落白名单:pnpm 12 起命令行绕过已失效,没它这一步必被 ERR_PNPM_IGNORED_BUILDS 拦死。
+  ensureInstallAllowBuilds(dshDir)
   const ins = await runAsync(pnpm, ['add', `@deepseek-ai/dsh@${dshVer}`, `--registry=${REGISTRY}`, '--config.strictDepBuilds=false'], dshDir, label, process.platform === 'win32', undefined, NPM_TIMEOUT_MS)
   if (!ins.ok) {
     taskDone(label, ins.code ?? 1)
@@ -575,6 +619,8 @@ export async function updateRuntime(): Promise<CmdResult> {
     taskProgress(label, progress, t(`安装中…(${Math.round(progress * 100)}%)`, `Installing… (${Math.round(progress * 100)}%)`))
   }, 2500)
   try {
+    // 同 installRuntime:升级前也要保证白名单在位(pnpm 12 只认 allowBuilds)。
+    ensureInstallAllowBuilds(dshInstallDir())
     const r = await runAsync(pnpm, ['add', `@deepseek-ai/dsh@${dshVer}`, `--registry=${REGISTRY}`, '--config.strictDepBuilds=false'], dshInstallDir(), label, process.platform === 'win32')
     if (!r.ok) {
       taskDone(label, r.code ?? 1)
