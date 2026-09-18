@@ -8,6 +8,24 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
+ * 标准构建白名单:dsh 核心 / 原生依赖需要 postinstall,pnpm 10+ 默认拦截。
+ *
+ * 放在这里(而不是 plugins.ts),因为插件安装与内置运行环境安装都要用:
+ * - 插件侧写进 profile 的 pnpm-workspace.yaml(`allowBuilds`)并动态补漏;
+ * - 内置环境侧写进 `<runtimeRoot>/dsh/pnpm-workspace.yaml` —— 少了它,全新机器的一键
+ *   安装会在 `pnpm add @deepseek-ai/dsh` 这步被 `ERR_PNPM_IGNORED_BUILDS` 拦死
+ *   (2026-09-18 实测:安装过程现装的 pnpm 12 已不再认 `--config.strictDepBuilds=false` 绕过)。
+ */
+export const STANDARD_ALLOW_BUILDS = [
+  'node-llama-cpp',
+  'node-pty',
+  'koffi',
+  'protobufjs',
+  '@google/genai',
+  '@deepseek-ai/dsh-subprocess-local'
+]
+
+/**
  * 为 `dsh plugin <add|remove> …` 决定 argv。
  * pnpm 9 在 workspace 根目录 add 必须带 -w(#17,#20);所有 pnpm major 在非 workspace
  * 目录带 -w 都会失败。所以仅当 profile 有 pnpm-workspace.yaml 时注入 -w。

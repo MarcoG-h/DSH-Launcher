@@ -12,7 +12,7 @@ import { bundledEnv, downloadFile, extractZip, progressLine, resolveBundledNode 
 import { outputOf, runAsync, taskDone, taskLine, taskProgress } from './task'
 import { bundleTaskLabel, RECOMMENDED_BUNDLES } from '../shared/bundles'
 import { parseGitHubUrl } from '../shared/github'
-import { classifyPnpmFailure, pluginArgsFor } from './pnpm-compat'
+import { STANDARD_ALLOW_BUILDS, classifyPnpmFailure, pluginArgsFor } from './pnpm-compat'
 import type { BundlePlugin, CmdResult, InstalledPlugin, LocalPlugin, PluginCellStatus, PluginListResult, PluginMatrixColumn, PluginMatrixResult, PluginMeta, RecommendedBundle } from '../shared/types'
 
 function readJson(file: string): Record<string, unknown> | null {
@@ -690,15 +690,8 @@ function parseIgnoredBuildPackages(stderr: string | undefined): string[] {
     .filter(Boolean)
 }
 
-/** 标准构建白名单:dsh 核心 / 原生依赖需要 postinstall,pnpm 10+ 默认拦截。 */
-export const STANDARD_ALLOW_BUILDS = [
-  'node-llama-cpp',
-  'node-pty',
-  'koffi',
-  'protobufjs',
-  '@google/genai',
-  '@deepseek-ai/dsh-subprocess-local'
-]
+/** 标准构建白名单:定义在 pnpm-compat(插件侧与内置运行环境侧共用)。 */
+export { STANDARD_ALLOW_BUILDS } from './pnpm-compat'
 
 /**
  * Pull the repo-level allowBuilds key out of pnpm's git-prepare error. pnpm's
